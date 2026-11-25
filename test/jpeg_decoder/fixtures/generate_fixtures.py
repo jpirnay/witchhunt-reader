@@ -66,6 +66,11 @@ Fixtures:
                      takes only the first DC scan (decodeResized, at Al <= 1) must read on to Al = 0 here.
                      Same coefficients as prog_full_420.jpg (asserted below).
 
+  prog_420_chroma_first.jpg  prog_full_420.jpg with its DC first scan split into a chroma-only DC first scan
+                     (Cb and Cr) and then a luma one, both at Al = 1, as a jpegtran scan script can order them.
+                     The first scan touches no luma, so a decode records none for it: the 1/8 resize
+                     (firstDcScanOnly) must read on to the luma scan. Same coefficients (asserted below).
+
 Progressive cases from the Free-Ink SDK decoder's test matrix (freeink-sdk c51246c8,
 libs/assets/ProgressiveJpeg/test/host/run.py), each with its libjpeg luma as the reference
 (<name>.y.pgm), checked like prog_full_*:
@@ -423,6 +428,60 @@ def split_dc_scans(data):
                                                 dc_refinement(comps, mcus, order, dc, 1, 0)]})
 
 
+def chroma_first_dc_scans(data):
+    """The file with its interleaved DC first scan (Al = 1) split in two, as a jpegtran scan script can order
+    them: a DC first scan of the chroma alone (Cb and Cr interleaved), then one of luma alone (non-interleaved,
+    in raster order), both at Al = 1 with the K.3 DC tables. The interleaved DC refinement and every other scan
+    stay as they were."""
+    segments, comps, mcus, order, first, refine, dc = read_dc_scans(data)
+    sof = next(seg for marker, seg in segments if marker == 0xC2)
+    height, width = (sof[5] << 8) | sof[6], (sof[7] << 8) | sof[8]
+    hmax, vmax = max(c[1] for c in comps), max(c[2] for c in comps)
+    mcu_cols = -(-width // (8 * hmax))
+    luma, chroma = comps[0], comps[1:]
+    assert all(h == 1 and v == 1 for _, h, v in chroma), "one block of each chroma component an MCU"
+    # Every block's full-precision DC value by component, block row and block column (dc is in MCU order).
+    grid, values = {cid: {} for cid, _, _ in comps}, iter(dc)
+    for m in range(mcus):
+        my, mx = divmod(m, mcu_cols)
+        for cid, h, v in comps:
+            for b in range(h * v):
+                by, bx = divmod(b, h)
+                grid[cid][(my * v + by, mx * h + bx)] = next(values)
+    luma_code, chroma_code = canonical_codes(*K3_LUMA_DC)[1], canonical_codes(*K3_CHROMA_DC)[1]
+
+    def put(writer, code, diff):
+        category = abs(diff).bit_length()
+        writer.bits(*code[category])
+        writer.bits(diff if diff >= 0 else diff - 1, category)
+
+    def sos(selectors):  # [(component id, DC table)]: a DC first scan at Al = 1
+        header = bytes([len(selectors)]) + b"".join(bytes([cid, table << 4]) for cid, table in selectors)
+        return bytes([0xFF, 0xDA]) + (5 + len(header)).to_bytes(2, "big") + header + bytes([0, 0, 1])
+
+    writer, pred = EntropyWriter(), {cid: 0 for cid, _, _ in chroma}
+    for m in range(mcus):
+        my, mx = divmod(m, mcu_cols)
+        for cid, _, _ in chroma:
+            value = grid[cid][(my, mx)] >> 1
+            put(writer, chroma_code, value - pred[cid])
+            pred[cid] = value
+    chroma_scan = sos([(cid, 1) for cid, _, _ in chroma]) + writer.data()
+
+    # A non-interleaved scan covers the component's own blocks: ceil(width / 8) x ceil(height / 8) for luma.
+    writer, pred = EntropyWriter(), 0
+    for row in range(-(-height // 8)):
+        for col in range(-(-width // 8)):
+            value = grid[luma[0]][(row, col)] >> 1
+            put(writer, luma_code, value - pred)
+            pred = value
+    luma_scan = sos([(luma[0], 0)]) + writer.data()
+
+    tables = b"".join(bytes([k]) + bytes(t[0]) + bytes(t[1]) for k, t in enumerate((K3_LUMA_DC, K3_CHROMA_DC)))
+    dht = bytes([0xFF, 0xC4]) + (2 + len(tables)).to_bytes(2, "big") + tables
+    return rebuilt(data, segments, {first[0]: [dht, chroma_scan, luma_scan]})
+
+
 with open(os.path.join(HERE, "prog_full_420.jpg"), "rb") as f:
     merged = merge_dc_scans(f.read())
 with open(os.path.join(HERE, "prog_420_dc_first.jpg"), "wb") as f:
@@ -434,6 +493,11 @@ assert (Image.open(os.path.join(HERE, "prog_420_dc_first.jpg")).convert("RGB").t
 with open(os.path.join(HERE, "prog_420_dc_al2.jpg"), "wb") as f:
     f.write(split_dc_scans(open(os.path.join(HERE, "prog_full_420.jpg"), "rb").read()))
 assert (Image.open(os.path.join(HERE, "prog_420_dc_al2.jpg")).convert("RGB").tobytes() ==
+        Image.open(os.path.join(HERE, "prog_full_420.jpg")).convert("RGB").tobytes())
+
+with open(os.path.join(HERE, "prog_420_chroma_first.jpg"), "wb") as f:
+    f.write(chroma_first_dc_scans(open(os.path.join(HERE, "prog_full_420.jpg"), "rb").read()))
+assert (Image.open(os.path.join(HERE, "prog_420_chroma_first.jpg")).convert("RGB").tobytes() ==
         Image.open(os.path.join(HERE, "prog_full_420.jpg")).convert("RGB").tobytes())
 
 print("Fixtures written to", HERE)

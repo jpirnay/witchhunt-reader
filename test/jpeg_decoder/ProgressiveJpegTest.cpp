@@ -206,6 +206,12 @@ INSTANTIATE_TEST_SUITE_P(DcInTheFirstScan, ProgressiveJpegMatchesLibjpeg,
                          testing::Combine(testing::Values(Case{"prog_420_dc_first.jpg", "prog_full_420.y.pgm"}),
                                           testing::Values(0, 1, 2, 3)));
 
+// Chroma DC alone in the first scan, then luma DC in a scan of its own (a jpegtran scan script can order
+// them so). prog_full_420.jpg's coefficients again, and its reference.
+INSTANTIATE_TEST_SUITE_P(ChromaInTheFirstScan, ProgressiveJpegMatchesLibjpeg,
+                         testing::Combine(testing::Values(Case{"prog_420_chroma_first.jpg", "prog_full_420.y.pgm"}),
+                                          testing::Values(0, 1, 2, 3)));
+
 // The same coefficients in another scan layout decode to the same rows, byte for byte.
 TEST(ProgressiveJpeg, AnotherScanLayoutOfTheSameCoefficientsDecodesAlike) {
   for (const int shift : {0, 1, 2, 3}) {
@@ -924,7 +930,9 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegEighth,
                                          EighthCase{"prog_420_rst_row.jpg", 5568282327642717411ULL},
                                          EighthCase{"prog_gray_rst.jpg", 11315821893079572744ULL},
                                          // prog_full_420.jpg's coefficients, DC in the first scan
-                                         EighthCase{"prog_420_dc_first.jpg", 13821861766860504631ULL}));
+                                         EighthCase{"prog_420_dc_first.jpg", 13821861766860504631ULL},
+                                         // ...and with chroma DC alone in the first scan
+                                         EighthCase{"prog_420_chroma_first.jpg", 13821861766860504631ULL}));
 
 // A 1/8 decode needs nothing past the scan that makes luma DC final (a luma DC scan at Al = 0), so
 // its index pass ends there and it reads the file no further. With every read that starts past
@@ -972,6 +980,65 @@ TEST(ProgressiveJpeg, AnEighthReadsNothingPastTheScanThatCompletesLumaDc) {
                   windows ? "windows" : "shared", static_cast<unsigned>(clean.stats.reads),
                   static_cast<unsigned>(clean.stats.bytesRead), bytes.size(), limit);
     }
+  }
+}
+
+// A first scan of chroma DC alone (a jpegtran scan script can put it first) touches no luma, so the
+// index records no scan for it. The 1/8 resize (DecodeOptions::firstDcScanOnly) then judged a first
+// scan that was not there -- a default Scan, Al = 0 -- ended the index with nothing recorded and
+// failed the picture as invalid data. It must read on to the luma DC scan and draw what the same
+// coefficients in libjpeg's script draw (prog_full_420.jpg: its first scan is interleaved DC at Al = 1).
+TEST(ProgressiveJpeg, AFirstScanOfChromaAloneIsReadPast) {
+  const std::vector<ScanSpan> scans = scansOf(readBytes(fixture("prog_420_chroma_first.jpg")));
+  ASSERT_GE(scans.size(), 2u);
+  EXPECT_NE(scans[0].firstComponent, 1) << "the first scan is chroma alone";
+  EXPECT_EQ(scans[0].ss, 0);
+  EXPECT_EQ(scans[1].firstComponent, 1) << "luma DC follows in a scan of its own";
+  EXPECT_EQ(scans[1].components, 1);
+  EXPECT_EQ(scans[1].ss, 0);
+  EXPECT_EQ(scans[1].al, 1);
+
+  struct Rows {
+    Gray image;
+    static bool take(void* user, uint16_t y, const uint8_t* gray, uint16_t width) {
+      auto& r = *static_cast<Rows*>(user);
+      if (y != r.image.h) return false;
+      r.image.w = width;
+      r.image.px.insert(r.image.px.end(), gray, gray + width);
+      ++r.image.h;
+      return true;
+    }
+  };
+  const auto resized = [](const char* jpg, const uint16_t width, const uint16_t height, Rows& rows) {
+    FsFile file;
+    EXPECT_TRUE(file.openForRead(fixture(jpg)));
+    ProgressiveJpeg::DecodeOptions options;
+    const auto result = ProgressiveJpeg::decodeResized(file, options, width, height, Rows::take, &rows);
+    file.close();
+    return result;
+  };
+  // The 1/8 picture over every block (203 x 141 -> 26 x 18), and a box that enlarges it.
+  const uint16_t boxes[][2] = {{26, 18}, {90, 60}};
+  for (const auto& box : boxes) {
+    SCOPED_TRACE(std::to_string(box[0]) + "x" + std::to_string(box[1]));
+    Rows chromaFirst;
+    Rows libjpegScript;
+    const auto result = resized("prog_420_chroma_first.jpg", box[0], box[1], chromaFirst);
+    ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+    ASSERT_EQ(resized("prog_full_420.jpg", box[0], box[1], libjpegScript), ProgressiveJpeg::Result::Ok);
+    EXPECT_EQ(chromaFirst.image.w, box[0]);
+    EXPECT_EQ(chromaFirst.image.h, box[1]);
+    EXPECT_TRUE(chromaFirst.image.px == libjpegScript.image.px);
+  }
+  // Every scale reads past it too, and decodes the same rows as libjpeg's script.
+  for (const int shift : {0, 1, 2, 3}) {
+    SCOPED_TRACE(std::string("1/") + std::to_string(1 << shift));
+    Capture chromaFirst;
+    Capture libjpegScript;
+    ASSERT_EQ(decode("prog_420_chroma_first.jpg", shift, chromaFirst), ProgressiveJpeg::Result::Ok);
+    ASSERT_EQ(decode("prog_full_420.jpg", shift, libjpegScript), ProgressiveJpeg::Result::Ok);
+    ASSERT_FALSE(chromaFirst.image.px.empty());
+    EXPECT_TRUE(chromaFirst.image.px == libjpegScript.image.px);
   }
 }
 
