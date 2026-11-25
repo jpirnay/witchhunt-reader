@@ -2596,12 +2596,12 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
     pendingPreRender = true;
     markStagedForCurrentPage();
   }
-  const char* note = !complete        ? (preempted  ? " -- preempted by input, retries after the next settle"
-                                         : building ? " -- left for the lane after the build"
-                                         : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
-                                                                             : " -- incomplete, will retry once")
-                     : redraw         ? " -- on screen, redrawing"
-                     : shownNowCached ? " -- on screen, input waiting (the next render shows it)"
+  const char* note = !complete                  ? (preempted  ? " -- preempted by input, retries after the next settle"
+                                                   : building ? " -- left for the lane after the build"
+                                                   : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
+                                                                                       : " -- incomplete, will retry once")
+                     : redraw                   ? " -- on screen, redrawing"
+                     : shownNowCached           ? " -- on screen, input waiting (the next render shows it)"
                      : nextPageNowPreRenderable ? " -- next page, pre-rendering it"
                                                 : "";
   LOG_INF("ERS", "Image lane: spine %d page %d warmed in %lums%s (free=%lu contig=%lu)", spine, pageIndex,
