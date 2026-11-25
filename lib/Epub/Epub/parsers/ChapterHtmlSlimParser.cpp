@@ -577,6 +577,13 @@ bool isHeaderOrBlock(const char* name) {
   return matches(name, HEADER_TAGS, NUM_HEADER_TAGS) || matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS);
 }
 
+// A block whose start or end ends the paragraph of a cell laid out as the page's paragraphs
+// (ChapterHtmlSlimParser::layOutParagraphCell). Not a <br>, which ends only a line, nor a <caption>, which a nested
+// table opens as a cell of its own.
+bool endsCellParagraph(const char* name) {
+  return isHeaderOrBlock(name) && strcmp(name, "br") != 0 && strcmp(name, "caption") != 0;
+}
+
 // Returns true if the HTML element is a purely inline wrapper whose ids are mostly not
 // navigation targets. Reading-system converters (Kobo KePub, Calibre, etc.) frequently inject
 // thousands of such IDs for progress tracking or internal bookkeeping -- but some books do put
@@ -1438,6 +1445,16 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           return false;
         }
       }
+    }
+    // A cell laid out as the page's paragraphs has no such budget, and a nested table's cell can hold a chapter (#832):
+    // it goes out in parts at the main block's threshold, its last line kept for the words to come, as a long block
+    // does (splitLongBlock). Not inside a ruby, whose bases wait for their reading.
+    if (paragraphCellOpen() && rubyDepth_ < 0 &&
+        currentTableCell->text->size() > splitThresholdAfter(currentTableCell->splitKept) &&
+        !layOutParagraphCell(/*whole=*/false)) {
+      partWordBufferIndex = 0;
+      nextWordContinues = false;
+      return false;
     }
   } else if (currentTextBlock && census_) {
     // Counted, and kept only as the block's first word: what follows depends on whether the block is empty, never on
@@ -2730,9 +2747,16 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
 
 void ChapterHtmlSlimParser::emitPendingListMarker() {
   if (pendingListMarker_[0] == '\0') return;
-  if (currentTextBlock)
-    currentTextBlock->addWord(pendingListMarker_, EpdFontFamily::REGULAR, false, false,
-                              ParsedText::DEFAULT_WORD_SIZE_PCT, placementOffset());
+  // Where the item's words go: in a table cell, the cell's text. In the page's block, the next item laid the marker out
+  // as a line of its own in the page's flow, under the rows packed for the page (an arena build stopped there).
+  if (ParsedText* const target = wordTarget()) {
+    target->addWord(pendingListMarker_, EpdFontFamily::REGULAR, false, false, ParsedText::DEFAULT_WORD_SIZE_PCT,
+                    placementOffset());
+    // A word of a row headed for the grid, charged as flushPartWordBuffer charges one: the item's first word checks.
+    if (target != currentTextBlock.get() && currentTable && !currentTable->degraded && !currentTable->rowDegraded) {
+      currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_WORD;
+    }
+  }
   pendingListMarker_[0] = '\0';
 }
 
@@ -4149,6 +4173,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
        (matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS) && strcmp(name, "br") != 0) || opensBlockSpan)) {
     if (!self->flushPartWordBuffer()) return;
   }
+  // A cell laid out as the page's paragraphs ends its paragraph at a block, as the page does: its words so far go out,
+  // and the block's start a paragraph of their own (they ran on into one). A grid cell's lines are its row's.
+  if (endsCellParagraph(name) && self->paragraphCellOpen() && !self->layOutParagraphCell(/*whole=*/true)) return;
 
   // CSS page-break-before / page-break-after: always. The break before waits for the block's
   // startNewTextBlock, which lays out the paragraph still pending before it: taken here, the page
@@ -5143,6 +5170,12 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   if (strcmp(name, "li") == 0 || strcmp(name, "ul") == 0 || strcmp(name, "ol") == 0) {
     self->emitPendingListMarker();
   }
+  // A cell laid out as the page's paragraphs ends its paragraph where a block ends too, as at a block's start
+  // (startElement): loose text after the block starts one of its own. Not inside a hidden subtree, which makes no box.
+  if (endsCellParagraph(name) && self->skipUntilDepth > self->depth - 1 && self->paragraphCellOpen() &&
+      !self->layOutParagraphCell(/*whole=*/true)) {
+    return;
+  }
 
   self->depth -= 1;
 
@@ -5465,6 +5498,11 @@ void ChapterHtmlSlimParser::flushAnchorsInRange(const int firstIndex, const int 
 // word it follows. An id inside a word (the partial word is counted) waits for that word's line.
 int ChapterHtmlSlimParser::inlineAnchorWordIndex() const {
   if (currentTable || census_) return 0;
+  // A block that holds no token yet waits for its first line: the next one placed, whichever block it opens. Counted
+  // on, the id took the count of the block laid out last, which a grid table, an <hr>, a box's close and a background
+  // picture lay out without starting a block (makePages); the next block's start reset the count and not the id, which
+  // then waited for as many tokens more of that block, a page or more into a long one (#846).
+  if ((!currentTextBlock || currentTextBlock->sourceTokenCount() == 0) && !partWordHasText()) return 0;
   const int soFar = lineTokensSoFar();
   return soFar > 0 ? soFar + (partWordHasText() ? 0 : 1) : 0;
 }
@@ -6108,7 +6146,11 @@ void ChapterHtmlSlimParser::clearSpentBlockDirection(const int elementDepth) {
   if (!spent.textAlignDefined) spent.alignment = readerAlignment();
 }
 
-size_t ChapterHtmlSlimParser::splitThreshold() const { return std::max<size_t>(96, splitKeptTokens_ + kSplitRegrowth); }
+size_t ChapterHtmlSlimParser::splitThresholdAfter(const size_t keptTokens) {
+  return std::max<size_t>(96, keptTokens + kSplitRegrowth);
+}
+
+size_t ChapterHtmlSlimParser::splitThreshold() const { return splitThresholdAfter(splitKeptTokens_); }
 
 void ChapterHtmlSlimParser::applySplitCapacity() {
   // The split fires on the token past the threshold, so the block never holds more than threshold + 1 of them, but
@@ -7403,6 +7445,61 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   packer.reset();
 }
 
+bool ChapterHtmlSlimParser::layOutCellText(ParsedText& text, const bool includeLastLine) {
+  // Guard here rather than once per table: in streaming mode this is the only gate the
+  // cells pass through, and layoutAndExtractLines below is the allocation that fails.
+  if (!ensureHeapForTextLayout("table cell paragraph", &text)) return false;
+  // A paragraph's first part starts a block, which lays out what the page's block holds and settles a waiting anchor.
+  // A later part goes on in it: the count of its lines' tokens runs on, for the footnote links it holds.
+  if (!text.isContinuation()) {
+    auto cellBlockStyle = BlockStyle();
+    cellBlockStyle.textAlignDefined = true;
+    cellBlockStyle.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
+                                   ? CssTextAlign::Justify
+                                   : static_cast<CssTextAlign>(paragraphAlignment);
+    startNewTextBlock(cellBlockStyle);
+  }
+  // Laid out as page paragraphs now, so wired as page paragraphs. layoutTableRow left this text
+  // wired for a grid row: lines in the arena with NO page-fit hook, the row being placed whole
+  // inside a block of its own. Kept like that here, a line that did not fit was materialised in
+  // the current page's block BEFORE addLineToPage emitted that page -- and the emit rewound the
+  // block under it. The line went on to the next page pointing at reclaimed bytes, the lines
+  // after it overwrote them, and the page was written with a corrupt TextBlock ("corrupt word
+  // offset", the page unreadable even after a rebuild). Seen on an X3 in Alice's chapter 2,
+  // where a cell holding a tall picture fell back to paragraphs. Arena builds only.
+  wireParagraphLines(text);
+  text.layoutAndExtractLines(
+      renderer, fontId, viewportWidth,
+      [this, &text](std::unique_ptr<TextBlock> tb, bool lineEndsWithHyphen, bool suppressRetry) {
+        return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry, text.lastLineVisibleOffset(),
+                             text.lastLineTokenCount());
+      },
+      includeLastLine);
+  return true;
+}
+
+bool ChapterHtmlSlimParser::paragraphCellOpen() const {
+  return currentTableCell != nullptr && currentTableCell->text && currentTable &&
+         (currentTableCell->streamed || currentTable->degraded || currentTable->rowDegraded);
+}
+
+bool ChapterHtmlSlimParser::layOutParagraphCell(const bool whole) {
+  BufferedTableCell& cell = *currentTableCell;
+  ParsedText& text = *cell.text;
+  if (text.isEmpty()) return true;
+  if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the bases go out with the words before them
+  if (!layOutCellText(text, /*includeLastLine=*/whole)) return false;
+  if (whole) {
+    // The next paragraph's, in the cell's direction; the text keeps the capacity its words grew it to.
+    const BlockStyle style = text.getBlockStyle();
+    text.reset(style);
+    cell.splitKept = 0;
+  } else {
+    cell.splitKept = static_cast<uint16_t>(std::min<size_t>(text.size(), UINT16_MAX));
+  }
+  return true;
+}
+
 // Greedily pack laid-out rows into fragments, page-breaking between fragments. A row whose
 // renderCols differs from the pending fragment flushes it first, since each PageTableFragment
 // carries a single fixed column count.
@@ -7412,36 +7509,8 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
   // path peak at buffer + emit simultaneously.
   std::unique_ptr<ParsedText> text = std::move(cell.text);
 
-  if (text && !text->isEmpty()) {
-    // Guard here rather than once per table: in streaming mode this is the only gate the
-    // cells pass through, and layoutAndExtractLines below is the allocation that fails.
-    if (!ensureHeapForTextLayout("table cell paragraph", text.get())) {
-      return false;  // parse already stopped; cell text freed on return
-    }
-    auto cellBlockStyle = BlockStyle();
-    cellBlockStyle.textAlignDefined = true;
-    cellBlockStyle.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                                   ? CssTextAlign::Justify
-                                   : static_cast<CssTextAlign>(paragraphAlignment);
-    // Re-use the existing paragraph pipeline by moving the cell text into currentTextBlock
-    startNewTextBlock(cellBlockStyle);
-    // Laid out as page paragraphs now, so wired as page paragraphs. layoutTableRow left this text
-    // wired for a grid row: lines in the arena with NO page-fit hook, the row being placed whole
-    // inside a block of its own. Kept like that here, a line that did not fit was materialised in
-    // the current page's block BEFORE addLineToPage emitted that page -- and the emit rewound the
-    // block under it. The line went on to the next page pointing at reclaimed bytes, the lines
-    // after it overwrote them, and the page was written with a corrupt TextBlock ("corrupt word
-    // offset", the page unreadable even after a rebuild). Seen on an X3 in Alice's chapter 2,
-    // where a cell holding a tall picture fell back to paragraphs. Arena builds only.
-    wireParagraphLines(*text);
-    // Transfer words from the buffered cell text into the new currentTextBlock
-    // by re-running layout directly
-    text->layoutAndExtractLines(
-        renderer, fontId, viewportWidth,
-        [this, &text](std::unique_ptr<TextBlock> tb, bool lineEndsWithHyphen, bool suppressRetry) {
-          return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry, text->lastLineVisibleOffset(),
-                               text->lastLineTokenCount());
-        });
+  if (text && !text->isEmpty() && !layOutCellText(*text, /*includeLastLine=*/true)) {
+    return false;  // parse already stopped; cell text freed on return
   }
   text.reset();  // free the words before the image decode below needs contiguous heap
 

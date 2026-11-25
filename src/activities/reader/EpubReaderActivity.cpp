@@ -4748,10 +4748,9 @@ int EpubReaderActivity::nextReadingSpine() const {
 std::optional<std::pair<uint16_t, uint16_t>> EpubReaderActivity::carriedStarHere() const {
   if (!section || section->currentPage != 0 || currentSpineIndex <= 0) return std::nullopt;
   const auto heading = static_cast<uint16_t>(currentSpineIndex - 1);
-  if (!bookmarkStore.has(heading, 0) ||
-      !Section::carriesPreviousOf(*epub, currentSpineIndex, getEffectiveVerticalText())) {
-    return std::nullopt;
-  }
+  // The answer the section's layout took, not the question asked again: the status bar asks this from the render task,
+  // where a heading file not remembered was inflated on the heap, and the answer could differ from the layout's.
+  if (!bookmarkStore.has(heading, 0) || !section->carriesHeadingFile()) return std::nullopt;
   return std::make_pair(heading, static_cast<uint16_t>(0));
 }
 

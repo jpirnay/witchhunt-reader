@@ -155,6 +155,8 @@ If two elements with `id` attributes appear before any `startNewTextBlock` call 
 
 When `startNewTextBlock` reuses an empty text block (the early-return path), `wordsExtractedInBlock` must be reset to 0. Without this, footnotes in the reused block could be assigned to wrong pages based on stale word counts from a prior block.
 
+The count is stale before that reset, too: a grid table, an `<hr>`, a box's close and a background picture lay the block before them out (`makePages`) without starting a new one, and the count of its tokens stands until the next block resets it. An inline id queued in between (`<table>..</table><span id="x"/><p>..`) therefore waits at index 0, the next line, whenever the block holds no token and no partial word (`inlineAnchorWordIndex`); counted on from the stale count it waited for that many tokens more of the next paragraph, a page or more into a long one (#846).
+
 ### getTocItem() does file I/O
 
 `epub->getTocItem()` reads from `BookMetadataCache` via file seek on every call. This is why `buildTocBoundariesFromFile` caches the TOC anchor strings into a small vector before entering the disk scan loop -- otherwise the inner loop would do file I/O (BookMetadataCache) for every on-disk anchor entry.

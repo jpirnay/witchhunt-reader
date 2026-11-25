@@ -39,7 +39,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 132;  // v132: in a table, a TOC anchor breaks the page only before the
+constexpr uint8_t SECTION_FILE_VERSION = 133;  // v133: an inline id between blocks names the next block's first
+                                               // line; a nested or degraded table's cell is laid out in parts and a
+                                               // paragraph per block in it; a list marker in a cell is the cell's
+                                               // v132: in a table, a TOC anchor breaks the page only before the
                                                // first packed row, and an <hr> draws no rule: both acted on the
                                                // page under the packed rows (an arena build corrupted or cut them)
                                                // v131: the header's line compression is TextScale (2^-20ths in a
@@ -503,7 +506,7 @@ uint32_t Section::layoutFingerprintFor(const BuildParams& p) { return layoutFing
 uint8_t Section::formatVersion() { return SECTION_FILE_VERSION; }
 
 bool Section::carriedAwayOf(const Epub& epub, const int spineIndex, const VerticalText request, BuildArena* scratch) {
-  return request == VerticalText::Off && epub.isCarriedSpine(spineIndex, scratch);
+  return request == VerticalText::Off && epub.carriedSpineForLayout(spineIndex, scratch);
 }
 
 bool Section::carriesPreviousOf(const Epub& epub, const int spineIndex, const VerticalText request,
@@ -533,6 +536,7 @@ void Section::becomeCarried(const BuildParams& p) {
   currentPage = 0;
   request_ = p.verticalText;
   vertical_ = false;
+  carriesHeading_ = false;
   const uint32_t propertyHash = calculatePropertyHash(p);
   layoutFingerprint_ = layoutFingerprintOf(propertyHash);
   SpinePageIndex::recordCarried(epub->getCachePath(), {propertyHash, SECTION_FILE_VERSION}, epub->getSpineItemsCount(),
@@ -887,6 +891,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   // carries the heading file before it.
   const uint32_t propertyHash = calculatePropertyHash(p);
   const bool carries = carriesPrevious(p);
+  carriesHeading_ = carries;  // a load that fails clears it (clearCache)
   const auto fileKey = [carries](const uint32_t hash) { return carries ? carryingHash(hash) : hash; };
   filePath = getSectionFilePath(fileKey(propertyHash));
   // The variant actually opened: the requested one, or the no-CSS one it falls back to.
@@ -1075,6 +1080,7 @@ bool Section::clearCache() {
   simplified_ = false;
   request_ = VerticalText::Off;  // a fresh section's, until a load or a build names one
   vertical_ = false;
+  carriesHeading_ = false;
 
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
@@ -1142,6 +1148,9 @@ struct Section::BuildState {
   ZipFile::FileStatSlim spineStat = {};
   bool statValid = false;
   bool statResolved = false;  // resolveSpineStat ran (statValid/inflatedSize are meaningful)
+  // The book's sheet table had no heap (CssParser::sheetTableRefused): the build resolves against every sheet, and is
+  // cached CSS-degraded (scopeStylesheets).
+  bool cssUnscoped = false;
   CssParser* cssParser = nullptr;
   // The parser stops a build at MAX_PAGES_PER_SECTION, so the table must never refuse below it.
   static_assert(PageLut::minMaxSize() >= Page::MAX_PAGES_PER_SECTION, "page LUT smaller than a section may be");
@@ -1520,6 +1529,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const uint32_t fileHash = st.carry.spine >= 0 ? carryingHash(st.propertyHash) : st.propertyHash;
   filePath = getSectionFilePath(fileHash);
   layoutFingerprint_ = layoutFingerprintOf(fileHash);
+  carriesHeading_ = st.carry.spine >= 0;
 
   st.localPath = epub->getSpineItem(spineIndex).href;
   SCT_TRACE_HEAP(spineIndex, "build_start");
@@ -1737,6 +1747,15 @@ bool Section::prepareCarry(BuildState& st) {
 
 bool Section::scopeStylesheets(BuildState& st) {
   CssParser* const css = st.cssParser;
+  // A table of the book's sheets the heap refused: every sheet applies, which is not this chapter's style. Cached as
+  // scoped, it was never rebuilt (#843); degraded, the reader rebuilds it when the heap has the table's few hundred
+  // bytes, which loadFromCache asks for again.
+  if (css != nullptr && css->sheetTableRefused()) {
+    LOG_ERR("SCT", "spine=%d: no heap for the stylesheet table; resolves against every sheet, cached CSS-degraded",
+            spineIndex);
+    st.cssUnscoped = true;
+    return true;
+  }
   // With one sheet or none every chapter resolves alike, and the head is not read.
   if (css == nullptr || css->sheetRanges().size() < 2) return true;
   // The head's links, through the scanner the heading carry reads files with (comments, CDATA, quoted values, prefixed
@@ -2230,7 +2249,9 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     // 14-page background build discarded after a single 960-byte dip below the lean floor,
     // forcing the released-path foreground rebuild whose 52 KB framebuffer realloc is the
     // failure that ends the session.
-    cssLowHeapDegraded_ = !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
+    // A stylesheet table the heap refused is lost whatever holds the rules: the chapter was not scoped.
+    cssLowHeapDegraded_ =
+        st.cssUnscoped || (!st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0);
   }
   st.parseMs += millis() - sliceStart;
   if (st.arena) st.laneParse = static_cast<uint32_t>(st.arena->laneHighWater());
@@ -2879,6 +2900,7 @@ bool Section::activeBuildCssDegraded() const {
   // is the mid-parse half of the same rule: Background-B polls this every slice and discards
   // the whole build the first time it returns true.
   if (!buildState_ || !buildState_->cssParser) return false;
+  if (buildState_->cssUnscoped) return true;  // no stylesheet table: degraded from its first slice, whatever the store
   if (buildState_->cssParser->isArenaResident()) return false;
   return buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
 }
