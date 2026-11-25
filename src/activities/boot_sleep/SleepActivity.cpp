@@ -1,9 +1,11 @@
 #include "SleepActivity.h"
 
+#include <BitmapRowCache.h>
 #include <Epub.h>
 #include <Epub/Section.h>
 #include <Epub/converters/DirectPixelWriter.h>
 #include <Epub/converters/PixelCache.h>
+#include <Epub/converters/PixelCacheReplay.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -22,6 +24,7 @@
 #include <functional>
 #include <memory>
 #include <new>
+#include <vector>
 
 #include "../reader/EpubProgressRecord.h"
 #include "../reader/EpubReaderActivity.h"
@@ -57,13 +60,24 @@ namespace {
 //
 // The leading dot keeps it out of collectSleepImages(), which skips dotfiles, so a
 // cache can never be picked as a sleep image itself.
-//
+std::string sleepSidecarPath(const std::string& imagePath, const std::string& suffix) {
+  const size_t slash = imagePath.find_last_of('/');
+  if (slash == std::string::npos) return "";
+  return imagePath.substr(0, slash + 1) + "." + imagePath.substr(slash + 1) + suffix;
+}
+
 // The name says nothing about which file was at the image's path, so the cache ends
 // with a stamp of the PNG it was decoded from (SleepPixelCacheStamp.h).
 std::string sleepPixelCachePath(const std::string& imagePath, uint8_t filter) {
-  const size_t slash = imagePath.find_last_of('/');
-  if (slash == std::string::npos) return "";
-  return imagePath.substr(0, slash + 1) + "." + imagePath.substr(slash + 1) + ".f" + std::to_string(filter) + ".pxc";
+  return sleepSidecarPath(imagePath, ".f" + std::to_string(filter) + ".pxc");
+}
+
+// A BMP's rows as Bitmap::readNextRow() makes them (BitmapRowCache.h): "/sleep/foo.bmp" -> "/sleep/.foo.bmp.t0.rows".
+// Keyed by the tone mapping rather than the filter, the one input the filter changes in the rows: the plain and the
+// 1-bit filters (tone mapping None) share one file. Everything else that makes the rows is in its header.
+constexpr char ROW_CACHE_SUFFIX[] = ".rows";
+std::string sleepRowCachePath(const std::string& imagePath, const BitmapToneMapping toneMapping) {
+  return sleepSidecarPath(imagePath, ".t" + std::to_string(static_cast<int>(toneMapping)) + ROW_CACHE_SUFFIX);
 }
 
 // Header and rows of a width x height sleep pixel cache: where its source stamp starts.
@@ -138,57 +152,9 @@ bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePa
     return false;
   }
 
-  const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, MSB first
-  int rowsPerRead = 4096 / bytesPerRow;
-  if (rowsPerRead < 1) rowsPerRead = 1;
-  if (rowsPerRead > cachedHeight) rowsPerRead = cachedHeight;
-
-  auto readBuffer = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(rowsPerRead) * bytesPerRow);
-  if (!readBuffer) {
-    rowsPerRead = 1;
-    readBuffer = makeUniqueNoThrow<uint8_t[]>(bytesPerRow);
-  }
-  if (!readBuffer) {
-    cacheFile.close();
-    return false;
-  }
-
-  DirectPixelWriter pw;
-  pw.init(renderer);
-
-  int rowsInBuffer = 0;
-  int bufferRow = 0;
-  for (int row = 0; row < cachedHeight; row++) {
-    if (bufferRow >= rowsInBuffer) {
-      const int toRead = (cachedHeight - row < rowsPerRead) ? (cachedHeight - row) : rowsPerRead;
-      const size_t bytes = static_cast<size_t>(toRead) * bytesPerRow;
-      const int bytesRead = cacheFile.read(readBuffer.get(), bytes);
-      if (bytesRead < 0 || static_cast<size_t>(bytesRead) != bytes) {
-        LOG_ERR("SLP", "Sleep pixel cache read error at row %d", row);
-        cacheFile.close();
-        return false;
-      }
-      rowsInBuffer = toRead;
-      bufferRow = 0;
-    }
-
-    // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
-    // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
-    const uint8_t* rowBuffer = readBuffer.get() + static_cast<size_t>(bufferRow) * bytesPerRow;
-    bufferRow++;
-
-    pw.beginRow(y + row);
-    int colStart, colEnd;
-    pw.bandColRange(x, cachedWidth, colStart, colEnd);
-    for (int col = colStart; col < colEnd; col++) {
-      const uint8_t packed = rowBuffer[col >> 2];
-      const uint8_t value = (packed >> (6 - (col & 3) * 2)) & 0x03;
-      pw.writePixel(x + col, value);
-    }
-  }
-
+  const bool ok = pixel_cache::replayRows(cacheFile, renderer, cachedWidth, cachedHeight, x, y);
   cacheFile.close();
-  return true;
+  return ok;
 }
 
 // Adaptive tone mapping applies to user-supplied sleep images only. The overlay
@@ -546,6 +512,10 @@ std::vector<std::string> collectSleepImages(bool allowPng) {
       continue;
     }
     char name[500];
+    // Every file's name, and the row caches among the dotfiles (sleepRowCachePath()), to drop the caches whose
+    // picture is gone: nothing else removes them, and each is a quarter of its picture's pixel count in bytes.
+    std::vector<std::string> names;
+    std::vector<std::string> rowCaches;
     for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
       if (file.isDirectory()) {
         file.close();
@@ -554,9 +524,11 @@ std::vector<std::string> collectSleepImages(bool allowPng) {
       file.getName(name, sizeof(name));
       auto filename = std::string(name);
       if (filename[0] == '.') {
+        if (filename.find(ROW_CACHE_SUFFIX) != std::string::npos) rowCaches.push_back(filename);
         file.close();
         continue;
       }
+      names.push_back(filename);
       const bool isBmp = FsHelpers::hasBmpExtension(filename);
       const bool isPng = allowPng && FsHelpers::hasPngExtension(filename);
       if (!isBmp && !isPng) {
@@ -575,6 +547,16 @@ std::vector<std::string> collectSleepImages(bool allowPng) {
       file.close();
     }
     dir.close();
+    for (const auto& cache : rowCaches) {
+      // ".<picture>.t<n>.rows", or a recording's ".part" of one: the picture is what lies between the dot and ".t".
+      const size_t tone = cache.rfind(".t", cache.find(ROW_CACHE_SUFFIX));
+      if (tone == std::string::npos || tone < 2) continue;
+      const std::string picture = cache.substr(1, tone - 1);
+      if (std::find(names.begin(), names.end(), picture) != names.end()) continue;
+      const std::string path = std::string(sleepDir) + "/" + cache;
+      LOG_INF("SLP", "Removing the row cache of a picture that is gone: %s", path.c_str());
+      Storage.remove(path.c_str());
+    }
   }
   // Sort by full path so the order is deterministic across reboots — required for sequential
   // pick mode, harmless for random pick mode.
@@ -717,7 +699,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       LOG_DBG("SLP", "Loading explicit custom sleep image: /sleep.bmp");
       const BookOverlayInfo resolvedOverlayInfo =
           shouldLoadOverlayInfo ? getBookOverlayInfo(APP_STATE.openEpubPath) : overlayInfo;
-      renderBitmapSleepScreen(bitmap, resolvedOverlayInfo);
+      renderBitmapSleepScreen(bitmap, "/sleep.bmp", resolvedOverlayInfo);
       explicitSleepFile.close();
       return;
     }
@@ -748,7 +730,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       delay(100);
       Bitmap bitmap(file, true, sleepImageToneMapping(), sleepEqualizeBlend(renderer));
       const bool parsed = bitmap.parseHeaders() == BmpReaderError::Ok;
-      if (parsed) renderBitmapSleepScreen(bitmap, resolvedOverlayInfo);
+      if (parsed) renderBitmapSleepScreen(bitmap, filename, resolvedOverlayInfo);
       file.close();
       return parsed;
     };
@@ -927,7 +909,8 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
   return info;
 }
 
-void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOverlayInfo& overlayInfo) const {
+void SleepActivity::renderBitmapSleepScreen(Bitmap& bitmap, const std::string& bitmapPath,
+                                            const BookOverlayInfo& overlayInfo) const {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
   const auto placement =
@@ -969,8 +952,26 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
     if (hasGreyscale && !nativeGray) levelPlan = renderer.grayLevelPlan();
   }
 
-  const auto drawTwoBitPicture = [&]() {
+  // The 2-bit picture is drawn once per plane, and every draw decoded and dithered the whole BMP; the rows now replay
+  // from a cache beside it once one draw has made them (BitmapRowCache.h), on this sleep and the ones after it. Not
+  // for a 1-bit picture, whose own fast path reads no rows, nor the deeper paths, which read 8-bit samples.
+  BitmapRowCache rowCache;
+  // cppcheck-suppress knownConditionTrueFalse ; levelPlan stays nullptr only in builds without kMayRunGrayLevelPlan
+  if (!nativeGray && levelPlan == nullptr && !bitmap.is1Bit()) {
+    rowCache.attach(bitmap, sleepRowCachePath(bitmapPath, sleepImageToneMapping()));
+  }
+  // The picture into the framebuffer, on `ground`. A cache read that fails partway leaves the pass short and drops
+  // the cache; the plane is then cleared and drawn again from the BMP.
+  const auto drawPicture = [&](const uint8_t ground) {
     renderer.drawBitmap(bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight);
+    if (!rowCache.takeReplayFailure()) return;
+    renderer.clearScreen(ground);
+    bitmap.rewindToData();
+    renderer.drawBitmap(bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight);
+  };
+
+  const auto drawTwoBitPicture = [&]() {
+    drawPicture(0xFF);
 
     if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
       renderer.invertScreen();
@@ -1164,7 +1165,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
       renderer.clearScreen(absolutePass ? 0xFF : 0x00);
       renderer.setRenderMode(mode);
       renderer.setAbsoluteGrayPlanes(absolutePass);
-      renderer.drawBitmap(bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight);
+      drawPicture(absolutePass ? 0xFF : 0x00);
       // setRenderMode(BW) also clears the absolute flag, hence re-arming it per
       // plane above.
       if (absolutePass) renderer.setRenderMode(GfxRenderer::BW);
@@ -1180,6 +1181,8 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
     renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
   }
+  // A recording that one pass made (the 1-bit filters draw only the B/W plane) is completed once the picture is out.
+  rowCache.finish();
 }
 
 void SleepActivity::renderCoverSleepScreen() const {
@@ -1281,7 +1284,7 @@ void SleepActivity::renderCoverSleepScreen() const {
       const uint8_t overlayMode = SETTINGS.sleepCoverOverlay;
       const BookOverlayInfo coverOverlayInfo =
           overlayMode != 0 ? getBookOverlayInfo(APP_STATE.openEpubPath) : BookOverlayInfo{};
-      renderBitmapSleepScreen(bitmap, coverOverlayInfo);
+      renderBitmapSleepScreen(bitmap, coverBmpPath, coverOverlayInfo);
       file.close();
       return;
     }

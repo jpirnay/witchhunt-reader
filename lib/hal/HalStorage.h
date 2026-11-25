@@ -235,6 +235,10 @@ class HalFile : public Print {
   bool rename(const char* newPath);
   bool getModifyDateTime(uint16_t* pdate, uint16_t* ptime);
   bool getCreateDateTime(uint16_t* pdate, uint16_t* ptime);
+  // The file's first cluster (0 while it is empty). A file written anew gets clusters of its own even under the same
+  // name, size and time (a device without a set clock stamps 1980), so this tells a replaced file from the one it
+  // replaced without reading either.
+  uint32_t firstCluster();
   bool isDirectory() const;
   // Where the entry sits in its folder: two handles in one folder with the same index are the same entry, however
   // each was opened. One opened through an 8.3 alias does not know its long name (getName() gives the alias back),

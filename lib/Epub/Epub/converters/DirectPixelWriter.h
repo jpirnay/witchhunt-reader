@@ -2,18 +2,16 @@
 
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
+#include <PackedPlaneTiles.h>
 #include <stdint.h>
 
 #include <cassert>
+#include <cstddef>
 
-// Direct framebuffer writer that eliminates per-pixel overhead from the image
-// rendering hot path.  Pre-computes orientation transform as linear coefficients
-// and caches render-mode state so the inner loop is: one multiply, one add,
-// one shift, and one AND per pixel — no branches, no method calls.
-//
-// Caller is responsible for ensuring (outX, outY) are within screen bounds.
-// ImageBlock::render() already validates this before entering the pixel loop,
-// and the JPEG/PNG callbacks pre-clamp destination ranges to screen bounds.
+// Direct framebuffer writer for the image paths. Orientation is collapsed into linear coefficients and the render mode
+// is read once, so writePixel() costs a transform and a bit write per pixel; it drops pixels outside the frame and the
+// write band itself. drawRows() draws whole decoded rows a framebuffer byte at a time (PackedPlaneTiles.h), as
+// writePixel() would bit by bit.
 struct DirectPixelWriter {
   uint8_t* fb;
   GfxRenderer::RenderMode mode;
@@ -196,6 +194,104 @@ struct DirectPixelWriter {
     } else {
       fb[byteIndex] |= bitMask;  // Set bit (draw white)
     }
+  }
+
+  // What writePixel() does in this mode, as a whole-byte operation (PackedPlaneTiles.h).
+  packed_plane::Op packedOp() const {
+    switch (mode) {
+      case GfxRenderer::BW:
+        return invert ? packed_plane::Op::BlackWhereWhite : packed_plane::Op::BlackUnlessWhite;
+      case GfxRenderer::GRAYSCALE_MSB:
+        return packed_plane::Op::SetAnyGray;
+      case GfxRenderer::GRAYSCALE_LSB:
+        return packed_plane::Op::SetDarkGray;
+      default:
+        return packed_plane::Op::None;
+    }
+  }
+
+  // A picture row runs down one physical column (portrait, either way up): rows can be drawn a byte column at a time.
+  bool drawsByteColumns() const { return phyXStepX == 0 && phyYStepY == 0; }
+
+  // `count` rows of 2-bit pixels (MSB first, rowBytes apart) from logical row y, `width` pixels each, the picture's
+  // left edge at logical x: the same frame as beginRow() + bandColRange() + writePixel() for every pixel of them.
+  void drawRows(const uint8_t* rows, const int rowBytes, const int count, const int x, const int y, const int width) {
+    const packed_plane::Op op = packedOp();
+    if (op == packed_plane::Op::None) return;
+    const int frameBits = static_cast<int>(displayWidthBytes) * 8;
+    if (!drawsByteColumns()) {
+      // Landscape: a picture row runs along one physical row, which it lies on wholly or not at all (bandColRange).
+      for (int r = 0; r < count; r++) {
+        beginRow(y + r);
+        int colStart, colEnd;
+        bandColRange(x, width, colStart, colEnd);
+        if (colStart >= colEnd) continue;
+        packed_plane::drawRowSpan(rows + static_cast<size_t>(r) * rowBytes, rowBytes, colStart, colEnd,
+                                  fb + static_cast<ptrdiff_t>(rowPhyYBase - originY) * displayWidthBytes,
+                                  rowPhyXBase + x * phyXStepX, phyXStepX, frameBits, op);
+      }
+      return;
+    }
+    const ptrdiff_t columnStep = static_cast<ptrdiff_t>(phyYStepX) * displayWidthBytes;
+    for (int r = 0; r < count;) {
+      beginRow(y + r);
+      const int phyX = rowPhyXBase;
+      // The rows from here to the edge of this physical byte column. A byte column lies wholly inside the frame or
+      // wholly outside it, as writePixel()'s phyX guard decides per pixel.
+      int run = phyXStepY > 0 ? 8 - (phyX & 7) : (phyX & 7) + 1;
+      if (run > count - r) run = count - r;
+      if (phyX >= 0 && phyX < frameBits) {
+        int colStart, colEnd;
+        bandColRange(x, width, colStart, colEnd);
+        if (colStart < colEnd) {
+          const uint8_t* lanes[8] = {};
+          for (int i = 0; i < run; i++) {
+            lanes[(phyX + i * phyXStepY) & 7] = rows + static_cast<size_t>(r + i) * rowBytes;
+          }
+          const int sy = rowPhyYBase + (x + colStart) * phyYStepX - originY;
+          packed_plane::drawByteColumn(lanes, rowBytes, colStart, colEnd,
+                                       fb + static_cast<ptrdiff_t>(sy) * displayWidthBytes + (phyX >> 3), columnStep,
+                                       op);
+        }
+      }
+      r += run;
+    }
+  }
+
+  // drawRows() a pixel at a time: the reference both byte paths must match.
+  void drawRowsPixelwise(const uint8_t* rows, const int rowBytes, const int count, const int x, const int y,
+                         const int width) {
+    for (int r = 0; r < count; r++) {
+      const uint8_t* row = rows + static_cast<size_t>(r) * rowBytes;
+      beginRow(y + r);
+      int colStart, colEnd;
+      bandColRange(x, width, colStart, colEnd);
+      for (int col = colStart; col < colEnd; col++) {
+        writePixel(x + col, (row[col >> 2] >> (6 - (col & 3) * 2)) & 0x03);
+      }
+    }
+  }
+
+  // For a loop that reads rows in batches: the most rows, up to maxRows, from logical row y whose end is the edge of a
+  // byte column, so drawRows() never splits one between two calls. maxRows itself where it cannot or need not.
+  int alignedRowCount(const int y, const int maxRows) const {
+    if (!drawsByteColumns() || maxRows < 8) return maxRows;
+    for (int n = maxRows; n > maxRows - 8; n--) {
+      const int nextPhyX = phyXBase + (y + n) * phyXStepY;
+      if ((nextPhyX & 7) == (phyXStepY > 0 ? 0 : 7)) return n;
+    }
+    return maxRows;
+  }
+
+  // Rows per read for a batch of about 4 KB (one read through the storage lock and SdFat for many rows): at most
+  // `rows`, and at least one. Where drawRows() draws byte columns it is rounded up to whole columns of eight: rounded
+  // down, alignedRowCount() cut a 34-row batch to 32 and a 464-row picture took a read more (Picco, 2026-11-25).
+  int rowsPerBatch(const int rowBytes, const int rows) const {
+    int n = rowBytes > 0 ? 4096 / rowBytes : 1;
+    if (n < 1) n = 1;
+    if (drawsByteColumns()) n = (n + 7) & ~7;
+    if (n > rows) n = rows;
+    return n > 0 ? n : 1;
   }
 };
 

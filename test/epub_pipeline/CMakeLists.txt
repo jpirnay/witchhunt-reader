@@ -60,6 +60,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/CooperativeAbort/CooperativeAbort.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
+  ${REPO_ROOT}/lib/GfxRenderer/BitmapRowCache.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${REPO_ROOT}/lib/ImageToBmp/ImageToBmp.cpp
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp

@@ -66,6 +66,7 @@ Every file in it has the format given here, behind a 512-byte header, and enciph
 | `details.bin` | all | `BookDetailsCache` `VERSION` (3) | What the Library's lists show: [below](#detailsbin) |
 | `thumb_*.bmp` | all | in the name | Cover thumbnails: [below](#cover-thumbnails) |
 | `cover.bmp` | all | none | The sleep screen's cover (`cover_crop.bmp` for an EPUB's cropped one) |
+| `.cover.bmp.t<n>.rows` | all | `BRC` and a version byte (`1`) | The sleep cover's 2-bit rows as `Bitmap::readNextRow()` makes them, one file per tone mapping `<n>` (`.cover_crop.bmp.t<n>.rows` beside the cropped one): [below](#sleep-picture-row-caches-rows) |
 | `book.bin` | EPUB | `BOOK_CACHE_VERSION` (19) | Metadata, spine and TOC: [below](#bookbin) |
 | `fingerprint.bin`, `toc.retry` | EPUB | none | [below](#fingerprintbin-and-tocretry) |
 | `pagelist.bin` | EPUB | none | The printed-page list: [below](#pagelistbin) |
@@ -100,6 +101,7 @@ CSS pass), `spines/<n>/anchors_<spine>.tmp` (a section's anchor map), `footnotes
 | `/sleep.bmp` | `BmpViewerActivity` | An image set as the sleep screen. A rendered one goes through `/sleep.bmp.tmp`, the old file kept as `/sleep.bmp.bak` until the swap is done |
 | `/sleep/weather.bmp` | `WeatherActivity` | The last fetched forecast as a custom sleep image, the panel's pixels in portrait as `ScreenshotUtil` writes them. Goes through `/sleep/weather.bmp.tmp` and `FileReplace` |
 | `.<image>.png.f<filter>.pxc` beside a sleep PNG | `SleepActivity` | The PNG's dithered pixels under one sleep filter: the `.pxc` layout of the book caches above, then a 12-byte stamp of the PNG it was decoded from (`SPS1`, `u32` size, `u16` FAT modify date, `u16` time; `SleepPixelCacheStamp.h`). A cache with no stamp, or with another file's, is deleted and the PNG decoded again |
+| `/sleep/.<image>.t<n>.rows`, `/.sleep/.<image>.t<n>.rows`, `/.sleep.bmp.t<n>.rows` | `SleepActivity` | A BMP sleep picture's 2-bit rows, beside it, for tone mapping `<n>` (`BitmapToneMapping`: 0 none, 1 adaptive, 2 equalize): [below](#sleep-picture-row-caches-rows). Removed when the picture is gone from `/sleep` or `/.sleep` |
 | `/crash_report.txt` | `HalSystem::checkPanic` | The last panic, written at the first boot after it: the firmware version, the panic reason, the last log lines and the stack. A watchdog reset writes one only when the panic handler ran first (`PanicReboot::isFromPanic()`). The Library's Books tab and All Files list it; New and Authors, Recent books and the next-book suggestion leave it out (`FirmwareFiles`) |
 | `/screenshots/*.bmp` | `ScreenshotUtil` | Screenshots, 1-bit, upright in the orientation the reader was held in |
 | `<dictionary>.qidx`, `.sidx` | `Dictionary` | Lookup indexes beside a dictionary's `.idx` and `.syn`, `SIDECAR_VERSION` (2): [dictionary.md](dictionary.md) |
@@ -788,3 +790,26 @@ subtable bytes. A face uses it only when every count and first-subtable index ma
   the block's made from it), and its room holds what the install would write there: the table is made again from the
   flash's copy of the tables and compared a half buffer at a time. A `CPac` torn by a power cut (the header is written
   after every block) does not match, and the block is erased and written again.
+
+## Sleep picture row caches (`.rows`)
+
+A sleep picture on a four-level panel is drawn once per plane, and each draw decoded and dithered the whole BMP. The
+first draw now records the rows `Bitmap::readNextRow()` makes into a file beside the BMP (`BitmapRowCache`,
+`lib/GfxRenderer/BitmapRowCache.h`), and every later draw, on this sleep and the next ones, reads them back. A
+1-bit picture (its own fast path reads no rows) and the panels that take more than four levels (they read 8-bit samples)
+do not use one.
+
+| Offset | Size | Contents |
+|---|---|---|
+| 0 | 4 | `BRC` and the layout's version (`1`) |
+| 4 | 4 | `u32` rendition fingerprint, `Bitmap::renditionFingerprint()`: CRC-32 over `RENDITION_VERSION`; the BMP's first cluster, size and modification time; whether a ditherer works; what the tone curve, `adjustPixel()` and the undithered quantiser make of each luminance; the panel's gray-4 table; the BMP's headers and palette and one 512-byte sector from each 32nd of its pixels |
+| 8 | 6 | `u16` width, height and bytes per row (`(width + 3) / 4`) |
+| 14 | 2 | 0 |
+| 16 | height x bytes per row | the rows in file order (bottom-up for an ordinary BMP), 2 bits a pixel, MSB first |
+
+A file whose header or size does not match is removed and recorded again. A recording goes to `<name>.part` and is
+renamed when every row is in it; a pass that stopped early (rows past the screen's edge) has the rest decoded first,
+and a read error while recording drops it. Bump `RENDITION_VERSION` in `Bitmap.cpp` when a ditherer makes other rows
+of the same inputs. The file is named after the tone mapping, the one input the sleep filter changes in the rows, so
+the plain and the 1-bit filters share one. `collectSleepImages()` removes the caches in `/sleep` and `/.sleep` whose
+picture is gone; a book's cover caches go with its cache folder.

@@ -7,6 +7,8 @@
 #include "AdaptiveTone.h"
 #include "BitmapHelpers.h"
 
+class BitmapRowCache;
+
 #pragma pack(push, 1)
 struct BmpHeader {
   struct {
@@ -91,10 +93,21 @@ class Bitmap {
   // `gray8Row`, when non-null, ALSO receives the tone-mapped 8-bit luminance of
   // every pixel -- the sample each 2-bit value is quantised from, one byte per
   // pixel, `width` bytes. Panels that resolve more than four levels consume that
-  // instead and quantise for themselves at their own depth. Purely additive: the
-  // 2-bit output and the dither state are byte-for-byte what they were without it.
+  // instead and quantise for themselves at their own depth. With `data` as well, the
+  // 2-bit output and the dither state are byte-for-byte what they are without it.
+  //
+  // `data` may be null when `gray8Row` is not: the samples alone, without the 2-bit row or the dither that makes it
+  // (a canvas or level-plane draw reads nothing else). The dither state is then left as it was; rewindToData()
+  // resets it before any 2-bit draw of the same bitmap.
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* gray8Row = nullptr) const;
   BmpReaderError rewindToData() const;
+
+  // 2-bit rows replayed from `cache` instead of decoded, or recorded into it (BitmapRowCache.h); null for neither.
+  void useRowCache(BitmapRowCache* cache) { rowCache = cache; }
+  // What readNextRow() makes of this file, as one number: the file (its first cluster, size and modification time,
+  // its headers and samples of its pixels) and everything that tones and dithers it. Leaves the file at the first row,
+  // so call it before a pass. False when the file cannot be read.
+  bool renditionFingerprint(uint32_t& out) const;
 
   // The 1-bit fast path (GfxRenderer::drawBitmap1Bit), for is1Bit() only. A 1-bit image is always
   // on the native palette, never dithered and never tone-analysed (parseHeaders), so readNextRow()
@@ -156,4 +169,6 @@ class Bitmap {
 
   mutable AtkinsonDitherer* atkinsonDitherer = nullptr;
   mutable FloydSteinbergDitherer* fsDitherer = nullptr;
+
+  BitmapRowCache* rowCache = nullptr;
 };

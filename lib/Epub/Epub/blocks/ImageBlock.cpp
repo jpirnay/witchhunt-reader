@@ -21,6 +21,7 @@
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/PixelCache.h"
+#include "../converters/PixelCacheReplay.h"
 #include "../converters/PngToFramebufferConverter.h"
 #include "PictureTone.h"
 
@@ -290,71 +291,10 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     }
   }
 
-  // Read several rows per SD access. A full-page image is replayed from cache up to
-  // 3x per page with AA on (BW plane + both grayscale planes), and a one-row-per-read
-  // loop here means hundreds of tiny reads through the storage mutex + SdFat each time —
-  // the dominant cost of displaying an image page. Batching rows into a ~4KB buffer
-  // cuts that down dramatically without holding the whole image.
-  // (Ported from upstream commit d9bcef7a, crosspoint-reader#2230, when the multi-strip
-  // grayscale passes made this ~14x; the strips are gone but the batching still pays.)
-  int rowsPerRead = 4096 / bytesPerRow;
-  if (rowsPerRead < 1) rowsPerRead = 1;
-  if (rowsPerRead > rowsToRender) rowsPerRead = rowsToRender;
-  uint8_t* readBuffer = (uint8_t*)malloc((size_t)rowsPerRead * bytesPerRow);
-  if (!readBuffer) {
-    // Fall back to a single-row buffer under memory pressure.
-    rowsPerRead = 1;
-    readBuffer = (uint8_t*)malloc(bytesPerRow);
-  }
-  if (!readBuffer) {
-    LOG_ERR("IMG", "Failed to allocate row buffer");
-    cacheFile.close();
-    return false;
-  }
-
-  DirectPixelWriter pw;
-  pw.init(renderer);
-
-  int rowsInBuffer = 0;
-  int bufferRow = 0;
-  for (int row = 0; row < rowsToRender; row++) {
-    if (bufferRow >= rowsInBuffer) {
-      const int toRead = (rowsToRender - row < rowsPerRead) ? (rowsToRender - row) : rowsPerRead;
-      const size_t bytes = (size_t)toRead * bytesPerRow;
-      const int bytesRead = cacheFile.read(readBuffer, bytes);
-      if (bytesRead < 0 || static_cast<size_t>(bytesRead) != bytes) {
-        LOG_ERR("IMG", "Cache read error at row %d", srcYOffset + row);
-        free(readBuffer);
-        cacheFile.close();
-        return false;
-      }
-      rowsInBuffer = toRead;
-      bufferRow = 0;
-    }
-
-    const uint8_t* rowBuffer = readBuffer + (size_t)bufferRow * bytesPerRow;
-    bufferRow++;
-
-    const int destY = y + row;
-    pw.beginRow(destY);
-    // Column window for the active write target. The strip-based grayscale passes are
-    // gone (isStripActive() is hardcoded false), so this is the full image width today
-    // and the range doubles as a bounds guard.
-    int colStart, colEnd;
-    pw.bandColRange(x, cachedWidth, colStart, colEnd);
-    for (int col = colStart; col < colEnd; col++) {
-      const int byteIdx = col >> 2;            // col / 4
-      const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
-      uint8_t pixelValue = (rowBuffer[byteIdx] >> bitShift) & 0x03;
-
-      pw.writePixel(x + col, pixelValue);
-    }
-  }
-
-  free(readBuffer);
+  const bool ok = pixel_cache::replayRows(cacheFile, renderer, cachedWidth, rowsToRender, x, y);
   cacheFile.close();
-  LOG_TRC("IMG", "Cache render complete");
-  return true;
+  if (ok) LOG_TRC("IMG", "Cache render complete");
+  return ok;
 }
 
 }  // namespace

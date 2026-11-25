@@ -1,10 +1,13 @@
 #include "Bitmap.h"
 
+#include <Crc32.h>
 #include <Logging.h>
 #include <Memory.h>
 
 #include <cstdlib>
 #include <cstring>
+
+#include "BitmapRowCache.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS
@@ -334,10 +337,88 @@ bool Bitmap::analyzeAdaptiveTone() {
   return true;
 }
 
+// Bump when readNextRow() makes other rows of the same file and settings (its ditherers, adjustPixel(), quantize()):
+// a row cache recorded by the old code then no longer matches.
+constexpr uint32_t RENDITION_VERSION = 1;
+
+bool Bitmap::renditionFingerprint(uint32_t& out) const {
+  if (!file || rowBytes <= 0 || height <= 0) return false;
+  uint32_t crc = 0;
+  const auto mix = [&crc](const auto& value) { crc = FsHelpers::crc32(&value, sizeof(value), crc); };
+
+  mix(RENDITION_VERSION);
+  // Which file: a file written anew gets clusters of its own; one rewritten on a computer also gets a new time. One
+  // the device rewrites in place without a clock keeps its clusters, size and 1980 stamp, and is told apart by its
+  // pixels below.
+  uint16_t modifiedDate = 0;
+  uint16_t modifiedTime = 0;
+  if (!file.getModifyDateTime(&modifiedDate, &modifiedTime)) modifiedDate = modifiedTime = 0;
+  mix(file.firstCluster());
+  mix(static_cast<uint32_t>(file.size()));
+  mix(modifiedDate);
+  mix(modifiedTime);
+  // How a luminance becomes a 2-bit value: the ditherer as it is (none when it, or its error rows, could not be had),
+  // and for each luminance what the tone curve, adjustPixel() and the undithered quantiser make of it -- so a change
+  // to their constants shows here without RENDITION_VERSION -- then the panel's gray-4 table the ditherers use.
+  const uint8_t ditherer = (atkinsonDitherer && atkinsonDitherer->active()) ? 1
+                           : (fsDitherer && fsDitherer->active())           ? 2
+                                                                            : 0;
+  mix(ditherer);
+  for (int lum = 0; lum < 256; lum++) {
+    const auto adjusted = static_cast<uint8_t>(adjustPixel(applyAdaptiveTone(static_cast<uint8_t>(lum))));
+    mix(adjusted);
+    mix(quantize(adjusted, lum, 3 * lum));
+  }
+  crc = FsHelpers::crc32(gray4tuning::thresholds, sizeof(gray4tuning::thresholds), crc);
+  crc = FsHelpers::crc32(gray4tuning::feedback, sizeof(gray4tuning::feedback), crc);
+
+  // The headers with the palette, then a 512-byte sector from each 32nd of the pixels: about one row of a cover in
+  // every 25, a sector read each.
+  constexpr size_t SAMPLE_BYTES = 512;
+  constexpr uint64_t SAMPLES = 32;
+  auto sample = makeUniqueNoThrow<uint8_t[]>(SAMPLE_BYTES);
+  if (!sample) return false;
+  if (!file.seek(0)) return false;
+  const uint32_t headerBytes = bfOffBits < 1100 ? bfOffBits : 1100;  // 54 bytes of headers and a 256-entry palette
+  for (uint32_t done = 0; done < headerBytes;) {
+    const uint32_t n = headerBytes - done < SAMPLE_BYTES ? headerBytes - done : SAMPLE_BYTES;
+    if (file.read(sample.get(), n) != static_cast<int>(n)) return false;
+    crc = FsHelpers::crc32(sample.get(), n, crc);
+    done += n;
+  }
+  const uint64_t pixelBytes = static_cast<uint64_t>(rowBytes) * static_cast<uint64_t>(height);
+  for (uint64_t part = 0; part < SAMPLES; part++) {
+    // On a sector boundary of the file, so each sample is one sector to read.
+    const uint64_t at = (bfOffBits + pixelBytes * part / SAMPLES) & ~static_cast<uint64_t>(SAMPLE_BYTES - 1);
+    const uint64_t from = at < bfOffBits ? bfOffBits : at;
+    const uint64_t end = bfOffBits + pixelBytes;
+    const size_t n = static_cast<size_t>(end - from < SAMPLE_BYTES ? end - from : SAMPLE_BYTES);
+    if (!file.seek(static_cast<size_t>(from)) || file.read(sample.get(), n) != static_cast<int>(n)) return false;
+    crc = FsHelpers::crc32(sample.get(), n, crc);
+  }
+  if (!file.seek(bfOffBits)) return false;
+  out = crc;
+  return true;
+}
+
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
 BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* gray8Row) const {
+  if (rowCache) {
+    if (gray8Row) {
+      // The cache holds the 2-bit rows only, and a replay leaves the file where the pass began.
+      LOG_ERR("BMP", "8-bit samples read with a row cache attached: cache dropped");
+      rowCache->abandon();
+    } else if (rowCache->replaying()) {
+      return rowCache->replayRow(data) ? BmpReaderError::Ok : BmpReaderError::ShortReadRow;
+    }
+  }
+
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
-  if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
+  if (file.read(rowBuffer, rowBytes) != rowBytes) {
+    // A recording would go on from wherever the failed read left the file: drop it.
+    if (rowCache && rowCache->recording()) rowCache->abandon();
+    return BmpReaderError::ShortReadRow;
+  }
 
   prevRowY += 1;
 
@@ -356,6 +437,10 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* g
     if (gray8Row) {
       const int adjusted = adjustPixel(lum);
       gray8Row[currentX] = static_cast<uint8_t>(adjusted < 0 ? 0 : (adjusted > 255 ? 255 : adjusted));
+    }
+    if (!data) {  // the samples alone: no 2-bit value to quantise or dither
+      currentX++;
+      return;
     }
     uint8_t color;
     if (atkinsonDitherer) {
@@ -439,6 +524,7 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* g
     default:
       return BmpReaderError::UnsupportedBpp;
   }
+  if (!data) return BmpReaderError::Ok;
 
   if (atkinsonDitherer)
     atkinsonDitherer->nextRow();
@@ -448,10 +534,13 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* g
   // Flush remaining bits if width is not a multiple of 4
   if (bitShift != 6) *outPtr = currentOutByte;
 
+  if (rowCache && rowCache->recording()) rowCache->recordRow(data);
   return BmpReaderError::Ok;
 }
 
 BmpReaderError Bitmap::rewindToData() const {
+  // A finished recording is published here, and the passes after it replay it.
+  if (rowCache) rowCache->rewind();
   if (!file.seek(bfOffBits)) {
     return BmpReaderError::SeekPixelDataFailed;
   }

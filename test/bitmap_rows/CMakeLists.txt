@@ -1,7 +1,9 @@
 add_executable(BitmapRowsTest
   BitmapRowsTest.cpp
   BitmapRowTargetTest.cpp
+  BitmapRowCacheTest.cpp
   ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
+  ${REPO_ROOT}/lib/GfxRenderer/BitmapRowCache.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${REPO_ROOT}/test/jpeg_decoder/Stubs.cpp
 )
@@ -16,6 +18,8 @@ target_include_directories(BitmapRowsTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/GfxRenderer
   ${REPO_ROOT}/lib/Memory
+  # Crc32.h, for the row cache's fingerprint.
+  ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib
 )
 
