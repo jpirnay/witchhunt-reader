@@ -317,7 +317,9 @@ Differences from upstream:
   web server lets the plugin read that exact file with `/download` and write it
   with `writeFile` (`PluginLocations::deviceJsonNames()`). A name with `..` in
   it names nothing. A credential store, a system folder and a path spelled by its
-  8.3 alias stay refused, as for every request. The reader reads a `token.file`
+  8.3 alias stay refused, as for every request, and so do the host approvals
+  (`/.crosspoint/plugin-hosts.json`): a plugin that could read and write them
+  could approve its own hosts. The reader reads a `token.file`
   and `config.file` for the plugin's [events](#events-the-reader-sends-a-plugins-requests)
   by the same rules (`PluginLocations::namedFilePath()`, `isProtectedPluginFile()`),
   so a `device.json` naming `/.crosspoint/wifi.json` gets no `{token}` from it.
@@ -586,8 +588,9 @@ only be enabled on networks you trust — that is true with or without plugins.
 That includes a plugin's own folder, and the token and config files its
 `device.json` names elsewhere: anyone on the network can read them with
 `/download` while File Transfer runs, as on upstream. A plugin can also overwrite
-any file its own `device.json` names; only the credential stores, the system
-folders and 8.3 alias spellings are off limits.
+any file its own `device.json` names; only the credential stores, the host
+approvals (`/.crosspoint/plugin-hosts.json`), the system folders and 8.3 alias
+spellings are off limits.
 
 The JSON endpoints a plugin drives (`POST /api/relay`, `/api/fetch` in its
 JSON form, `/api/plugins/hosts`) take only an `application/json` body. A

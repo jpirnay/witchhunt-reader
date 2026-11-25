@@ -603,7 +603,8 @@ endpoints and WebDAV. The rules are in
   The same holds for the exact files an installed plugin's `device.json` names as its token
   or config (`token.file`, `token.refresh_file`, `config.file`), wherever they are, as upstream
   allows: `/download` reads them and the calling plugin's writes reach them. A credential store,
-  a system folder or an 8.3 alias spelling is refused even then.
+  the host approvals (`/.crosspoint/plugin-hosts.json`, which only `/api/plugins/hosts` reads
+  and changes for a plugin), a system folder or an 8.3 alias spelling is refused even then.
 - Names are judged as the SD library opens them: leading spaces and trailing dots
   and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
   `/.crosspoint`. Matching ignores case.

@@ -51,6 +51,14 @@ inline constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTC
 inline constexpr const char* CREDENTIAL_FILES[] = {"/.crosspoint/wifi.json", "/.crosspoint/opds.json",
                                                    "/.crosspoint/koreader.json"};
 
+// What fences the plugins in: the hosts the user approved for each (PluginReach::kApprovalsPath). A
+// plugin may keep a token or config file at any path its device.json names, but not this one: reading
+// it hands over every plugin's approvals, and writing it would approve the plugin's own hosts. Refused
+// to plugins only (isProtectedPluginPath()); the user's own requests reach it as any file in
+// /.crosspoint. Prefix-matched like the credential stores, which covers the .tmp and .old copies its
+// save leaves in passing.
+inline constexpr const char* PLUGIN_FENCE_FILES[] = {"/.crosspoint/plugin-hosts.json"};
+
 // What the request does with the path, which decides how its LAST segment is judged.
 enum class Target : uint8_t {
   Directory,  // listed, or written into: every segment is a folder walked through
@@ -137,19 +145,22 @@ inline bool isCredentialPath(const std::string_view canonical) {
   return false;
 }
 
-// True when `path` must be refused. `path` should already have "." and ".." resolved
-// (normalizeWebPath / FsHelpers::normalisePath); this adds what SdFat does on top.
-//
-// `spelledByAlias(prefix, name)` is asked about every alias-shaped segment, with
-// `prefix` the requested path up to and including that segment. It answers whether an
-// entry exists there whose real name is NOT `name` -- i.e. whether the request reached
-// it through its 8.3 alias. Host tests pass a fake; the firmware asks the card.
+inline bool isPluginFencePath(const std::string_view canonical) {
+  for (const char* file : PLUGIN_FENCE_FILES) {
+    if (startsWithIgnoreCase(canonical, file)) return true;
+  }
+  return false;
+}
+
+namespace detail {
+
+// The walk of isProtectedPath() and isProtectedPluginPath(): true when a segment alone refuses
+// `path`; otherwise `canonical` is the path as SdFat opens it and `lastName` its last segment that
+// names something.
 template <typename SpelledByAlias>
-bool isProtectedPath(const std::string_view path, const Target target, const bool allowHidden,
-                     SpelledByAlias&& spelledByAlias) {
-  std::string canonical;
+bool refusedSegment(const std::string_view path, const bool allowHidden, SpelledByAlias& spelledByAlias,
+                    std::string& canonical, std::string_view& lastName) {
   canonical.reserve(path.size() + 1);
-  std::string_view lastName;
   size_t pos = 0;
   while (pos < path.size()) {
     if (path[pos] == '/') {
@@ -162,8 +173,8 @@ bool isProtectedPath(const std::string_view path, const Target target, const boo
     pos = end + 1;
     // A segment that trims to nothing is not a name to SdFat: a trailing one is
     // skipped like a separator ("/.crosspoint/ " opens "/.crosspoint"), any other
-    // fails the open. Either way it names nothing, so the item rule below must
-    // judge the last segment that DOES name something.
+    // fails the open. Either way it names nothing, so the item rule (isProtectedPath())
+    // must judge the last segment that DOES name something.
     if (name.empty()) continue;
 
     if (isSystemName(name)) return true;
@@ -174,8 +185,38 @@ bool isProtectedPath(const std::string_view path, const Target target, const boo
     canonical.append(name.data(), name.size());
     lastName = name;
   }
+  return false;
+}
+
+}  // namespace detail
+
+// True when `path` must be refused. `path` should already have "." and ".." resolved
+// (normalizeWebPath / FsHelpers::normalisePath); this adds what SdFat does on top.
+//
+// `spelledByAlias(prefix, name)` is asked about every alias-shaped segment, with
+// `prefix` the requested path up to and including that segment. It answers whether an
+// entry exists there whose real name is NOT `name` -- i.e. whether the request reached
+// it through its 8.3 alias. Host tests pass a fake; the firmware asks the card.
+template <typename SpelledByAlias>
+bool isProtectedPath(const std::string_view path, const Target target, const bool allowHidden,
+                     SpelledByAlias&& spelledByAlias) {
+  std::string canonical;
+  std::string_view lastName;
+  if (detail::refusedSegment(path, allowHidden, spelledByAlias, canonical, lastName)) return true;
   if (target == Target::Item && isDotName(lastName)) return true;
   return isCredentialPath(canonical);
+}
+
+// True when a plugin may not read or write `path` as a file of its own (a device.json's
+// token.file or config.file, isProtectedPluginFile()). Judged as a folder walked through with
+// hidden names allowed, which keeps every rule but the two about dot names (a token at
+// /.crosspoint/.readest-token.json), and refused as well for the PLUGIN_FENCE_FILES.
+template <typename SpelledByAlias>
+bool isProtectedPluginPath(const std::string_view path, SpelledByAlias&& spelledByAlias) {
+  std::string canonical;
+  std::string_view lastName;
+  if (detail::refusedSegment(path, true, spelledByAlias, canonical, lastName)) return true;
+  return isCredentialPath(canonical) || isPluginFencePath(canonical);
 }
 
 }  // namespace ProtectedPaths

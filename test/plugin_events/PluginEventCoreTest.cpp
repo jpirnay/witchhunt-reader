@@ -155,11 +155,10 @@ TEST(PluginEventCore, HandlersAreReadFromTheManifest) {
 }
 
 namespace {
-// The device asks isProtectedPluginFile() (src/network/WebPathGuard.cpp): ProtectedPaths judged as a folder walked
-// through with hidden names allowed, its 8.3 aliases looked up on the card. No alias on this card.
+// The device asks isProtectedPluginFile() (src/network/WebPathGuard.cpp): ProtectedPaths::isProtectedPluginPath(), its
+// 8.3 aliases looked up on the card. No alias on this card.
 bool refusedLikeTheWebServer(const std::string& path) {
-  return ProtectedPaths::isProtectedPath(path, ProtectedPaths::Target::Directory, true,
-                                         [](std::string_view, std::string_view) { return false; });
+  return ProtectedPaths::isProtectedPluginPath(path, [](std::string_view, std::string_view) { return false; });
 }
 bool refusesNothing(const std::string&) { return false; }
 std::string lastChecked;
@@ -202,7 +201,9 @@ TEST(PluginEventCore, ACredentialStoreIsNeverAPluginFile) {
   const std::string dir = "/.crosspoint/plugins/x";
   for (const char* name :
        {"/.crosspoint/wifi.json", "/.CrossPoint/WiFi.json", "/.crosspoint/opds.json", "/.crosspoint/koreader.json",
-        "/.crosspoint/wifi.json.bak", "//.crosspoint/./wifi.json", "/System Volume Information/x.json"}) {
+        "/.crosspoint/wifi.json.bak", "//.crosspoint/./wifi.json", "/System Volume Information/x.json",
+        // The host approvals: a plugin reading them as its token would carry every plugin's approvals off.
+        "/.crosspoint/plugin-hosts.json", "/.crosspoint/Plugin-Hosts.json"}) {
     EXPECT_EQ(pluginFile(dir, name, refusedLikeTheWebServer), "") << name;
   }
   // The check is asked about the resolved absolute path, not the name as written.
