@@ -224,21 +224,23 @@ on for about 180 sessions before the free figure reaches the minimum and it rebo
 
 - Host: the verdict function's tests (capability on and off, each minimum just above and below), and the full
   host suite.
-- Builds: `default` and `gh_release` locally; `lilygo_t5s3` locally only for the device run; `x4pro`, `murphy` and
-  `picco` left to CI.
-- Device, T5S3 (COM7), before each PR's S3 behaviour ships: every site in the PR at least once; one site five
+- Builds: `default` and `gh_release` locally; `picco` locally only for the device run; `x4pro`, `murphy` and
+  `lilygo_t5s3` left to CI.
+- Device, the Picco (COM9; the T5S3 is reserved for another test), before each PR's S3 behaviour ships. The Picco
+  runs Onyx's stock table: flash `boot_app0.bin` at `0x15000` and the app at `0xE0000` only, never
+  `pio run -e picco -t upload`, and copy the build's `web-<hash>.bin` to the card's top folder. Every site in the
+  PR at least once; one site five
   times in a row, at least one of them with a TLS connection (a KOReader sync or a Weather fetch); the internal
   figures before the radio comes up, at their lowest during the session and after the step, from the log and
   `STATE`. Then the first Wi-Fi session after a carry-on must still join and finish. The figures go into the PR
   body and into `docs/network-stack-findings.md`.
-- A second S3 (Picco or X4 Pro) if one is attached: SDMMC card, different panel. The Picco runs Onyx's stock
-  table: flash `app@0xE0000` and `otadata` only.
+- A second S3 (the T5S3 once it is free, or the X4 Pro): an SPI card, a different panel.
 - One case with a background sync job in flight when a Wi-Fi screen exits (S3): the step must reboot without a
   teardown, with no crash.
-- Optional heap map, offered to the user and not yet decided: a temporary serial command lists every internal
+- Heap map, approved by the user 2026-11-26 and run on the Picco before PR 1: a temporary serial command lists every internal
   block (`heap_caps_walk()`, present in the shipped S3 libraries, `esp_heap_caps.h:509`; heap tracing is compiled
   out) together with the task list, before Wi-Fi, after session 1 and after session 2. Comparing them names what
-  survives and where it sits. It runs on the same build and flash as PR 1's device run. It can confirm the
+  survives and where it sits. It runs on a throwaway branch (`spike/wifi-heap-map`). It can confirm the
   one-time reading above, find the 288 B per session, and show whether starting the network stack early at boot
   would keep the largest block whole.
 - The C3 (X4): optional in PR 1, to confirm the C3 still reboots and to collect its log lines. X3 runs are opt-in.
