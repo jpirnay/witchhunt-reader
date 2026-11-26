@@ -249,6 +249,8 @@ class MappedInputManager {
   // light. Reports nothing on an unlit board, where the top edge is the reader menu
   // instead — see the definition for why the two swap per board.
   bool wasLightPanelGesture() const;
+  // An inward swipe from the left edge: Back, outside the reader (ActivityManager::dispatchEdgeSwipeBack()).
+  bool wasLeftEdgeRightSwipe() const;
 
   // Front-strip hints for a screen that labels only the front buttons. `previous`/`next` name the
   // movement the strip performs — which physical pair that is, and in which order, follows the
@@ -458,5 +460,6 @@ inline MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int&, in
 inline bool MappedInputManager::wasHomeGesture() const { return false; }
 inline bool MappedInputManager::wasMenuGesture() const { return false; }
 inline bool MappedInputManager::wasLightPanelGesture() const { return false; }
+inline bool MappedInputManager::wasLeftEdgeRightSwipe() const { return false; }
 inline uint32_t MappedInputManager::lastTouchEventAtMs() const { return 0; }
 #endif  // !CP_TOUCH_UI

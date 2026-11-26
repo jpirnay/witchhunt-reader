@@ -89,6 +89,10 @@ class Activity {
   // the touch layer: it only steers the touch gate, and a virtual is a slot in every activity's vtable (~380 B on the
   // C3).
   virtual bool overlaysScreenBelow() const { return false; }
+  // An inward swipe from the left edge backs out of this screen, as Back does (ActivityManager::dispatchEdgeSwipeBack).
+  // Off for a screen whose own controls follow a finger sideways (a slider, the keyboard), whose sideways swipes mean
+  // something of their own (Home's carousel), or which takes the reader's controls (those turn pages).
+  virtual bool backsOutOnEdgeSwipe() const { return true; }
 #endif
   // The panel's polarity this screen goes out in under Dark Mode (DarkMode::invertsOutput): inverted with the setting,
   // unless it shows a picture of its own or the frame already on screen. ActivityManager sets the panel from it before
