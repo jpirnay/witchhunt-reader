@@ -107,6 +107,8 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // the page does (TouchGate.h). Without this the top-edge swipe on the page opened a drawer whose sliders, and the
   // tap outside that closes it, no finger could reach. Over any other screen it follows that screen's gate.
   bool overlaysScreenBelow() const override { return true; }
+  // The sliders follow a finger sideways from the left edge; Back, a tap outside or the grabber closes the drawer.
+  bool backsOutOnEdgeSwipe() const override { return false; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

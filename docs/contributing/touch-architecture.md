@@ -115,7 +115,8 @@ One loop tick handles touch in this order:
    `runAction()` as buttons and suppresses the contact.
 2. The activity's own `loop()`: reader page turns, FreeInkUI routing, screen-specific hit tests.
 3. `ActivityManager::loop()`, on touch builds only: `dispatchLightPanelGesture()`,
-   `dispatchListSwipe()`, `dispatchListTap()`, `dispatchHintStripTap()`.
+   `dispatchEdgeSwipeBack()` (a left-edge inward swipe is Back, where `Activity::backsOutOnEdgeSwipe()`
+   allows it), `dispatchListSwipe()`, `dispatchListTap()`, `dispatchHintStripTap()`.
 
 The dispatchers in step 3 are fallbacks: a screen that handles a tap itself claims it first.
 

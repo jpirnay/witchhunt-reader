@@ -130,6 +130,7 @@ button, and it works on every screen.
 | **Hold the top-left corner** | **Toggle reading light** — the same as in a book |
 | Swipe up / down over a list | Page the list |
 | Swipe **down from the top edge** | Reading light panel |
+| Swipe **in from the left edge** | Back, as the Back key does (not on Home, a slider, the keyboard or the light panel) |
 
 > The T5S3 has a **Down** key but no **Up** key, so paging a list *backward* has no
 > physical button there. Swiping down over the list is how you do it, and it works on the

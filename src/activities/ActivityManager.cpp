@@ -309,6 +309,7 @@ void ActivityManager::loop() {
     // Before the list dispatchers: a top-edge pull is an edge gesture, and a list occupying
     // the whole screen would otherwise read it as a page-down first.
     dispatchLightPanelGesture();
+    dispatchEdgeSwipeBack();
     dispatchListSwipe();
     dispatchListTap();
     dispatchHintStripTap();
@@ -1104,6 +1105,19 @@ void ActivityManager::dispatchListSwipe() {
   }
   LOG_DBG("TCH", "List swipe %s -> page %s", dir == MappedInputManager::SwipeDir::Up ? "up" : "down",
           dir == MappedInputManager::SwipeDir::Up ? "next" : "prev");
+}
+
+// Back for a finger: an inward swipe from the left edge, as on a phone. After the activity's loop(), so a screen that
+// took the swipe (and suppressed its contact) keeps it, and after main.cpp's gesture dispatch, so a swipe the user
+// bound to an action does that instead. Injected as the Back key, which every screen already answers, the hint strip's
+// Back box the same way. From PR #855 (trungtypo), where it was one board's and excluded Home by its name.
+void ActivityManager::dispatchEdgeSwipeBack() {
+  if (!mappedInput.hasTouch() || currentActivity == nullptr) return;
+  if (currentActivity->takesReaderControls() || !currentActivity->backsOutOnEdgeSwipe()) return;
+  if (!mappedInput.wasLeftEdgeRightSwipe()) return;
+  mappedInput.suppressTouchContact();
+  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Back));
+  LOG_DBG("TCH", "Left-edge swipe -> Back");
 }
 
 // The HAL backdates an injected hold by its own constant, because it cannot see the FSM's

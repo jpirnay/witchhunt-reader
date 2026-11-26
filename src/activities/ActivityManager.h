@@ -354,6 +354,9 @@ class ActivityManager {
   // definition for why this is a synthesis rather than a per-screen handler.
   void dispatchListSwipe();
   void dispatchHintStripTap();
+  // An inward swipe from the left edge is Back, outside the reader, on a screen that allows it
+  // (Activity::backsOutOnEdgeSwipe).
+  void dispatchEdgeSwipeBack();
 #endif  // CP_TOUCH_UI
 
   // If immediate is true, the update will be triggered immediately.

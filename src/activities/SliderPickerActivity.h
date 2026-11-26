@@ -48,6 +48,10 @@ class SliderPickerActivity : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+#if CP_TOUCH_UI
+  // The slider follows a finger sideways, from the left edge too.
+  bool backsOutOnEdgeSwipe() const override { return false; }
+#endif
 
  private:
   int value;
