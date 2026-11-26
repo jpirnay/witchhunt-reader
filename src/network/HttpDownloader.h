@@ -175,4 +175,10 @@ class HttpDownloader {
                                       ProgressCallback progress = nullptr, const std::string& username = "",
                                       const std::string& password = "",
                                       TlsPolicy tls = TlsPolicy::VerifiedThenUnverified);
+
+  /**
+   * Forget the servers whose certificate failed to verify (VerifiedThenUnverified), as a reboot does. Called when a
+   * Wi-Fi session ends (wifi_session::end()), so the next session verifies each server again.
+   */
+  static void forgetUnverifiableHosts();
 };

@@ -263,7 +263,8 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `bars`, `focus`, `tab`, `panel`, `row`, `starred` | EPUB reader, while the reader bars are open | `bars=live`; what has the key focus (`none`, `exit`, `star`, `tabs`, `prev`, `goto`, `next`, `layout`, `title`, `pull`, `push`, `list`, `light`); the tab it is on (`navigation`, `progress`, `layout`, `orientation`, `more`); the panel open above the tabs (`none`, `progress`, `layout`, `navigation`, `orientation`); with `focus=list`, the list row (0-based); `1` when the page on screen has a bookmark (`ReaderBarsController::appendDebugState`) |
 | `target`, `own`, `size`, `lines`, `margin`, `darkness`, `paragraphs`, `align`, `hyphens`, `bookstyle` | the reader bars' Layout panel | the control with the focus (an index), **This book only** (`1`/`0`), then the values the sheet shows in the settings' numbering: font size in points, the line-spacing step, the left and right margin in pixels, the text-darkness index, extra paragraph spacing, the paragraph-alignment index, hyphenation and Book style (each `1`/`0`) |
 | `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) that failed: the press or its release was not taken in |
-| `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
+| `heap`, `maxblock` | always | free heap and the largest free block, in bytes. `heap` counts internal RAM only (`ESP.getFreeHeap()`); on a PSRAM board `maxblock` is a PSRAM block |
+| `imaxblock` | PSRAM boards | the largest free block of internal RAM, the pool a Wi-Fi session narrows (`wifi_session::end()`) |
 
 Everything but `activity`, `stack`, `book`, `spine`, `page` and the reader bars' `bars`, `focus`, `tab`, `panel`,
 `row` and `starred` needs the full API. A popup counts as

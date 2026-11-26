@@ -204,6 +204,8 @@ HttpDownloader::DownloadError runGetDispatch(const std::string& url, const std::
 }
 }  // namespace
 
+void HttpDownloader::forgetUnverifiableHosts() { g_unverifiableHosts.clear(); }
+
 // ---- Session implementation ----
 
 struct HttpDownloader::Session::Impl {

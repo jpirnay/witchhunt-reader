@@ -1,6 +1,7 @@
 #include "SerialTestApi.h"
 
 #include <Arduino.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -679,6 +680,12 @@ void cmdState(std::string_view /*arg*/) {
   appendField(state, "heap", static_cast<long>(ESP.getFreeHeap()));
   appendField(state, "maxblock",
               static_cast<long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  // On a PSRAM board maxblock is a PSRAM block; the internal pool is the one a Wi-Fi session narrows (heap already
+  // counts it alone: ESP.getFreeHeap() is the internal free size).
+  if (HalCapabilities::keepsSecondaryBuffer()) {
+    appendField(state, "imaxblock",
+                static_cast<long>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+  }
 #endif
   reply(state);
 }

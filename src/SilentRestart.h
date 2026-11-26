@@ -25,6 +25,10 @@ void silentRestartToUsbDrive();
 // File Transfer, on its Calibre Wireless row: where Back from Calibre Wireless leads.
 void silentRestartToFileTransferCalibre();
 
+// True once enterDeepSleep() has committed to sleeping: every silentRestart*() then does nothing, and a Wi-Fi session
+// end leaves the radio to the sleep path (wifi_session::end()).
+bool deepSleepSupersedesRestart();
+
 // One-shot guarded variant for heap-fragmentation recovery: allows only one
 // restart attempt across consecutive silent boots until a non-silent boot
 // clears the latch.
