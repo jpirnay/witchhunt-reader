@@ -2492,7 +2492,10 @@ void loop() {
     // an action this screen can perform, and suppresses the contact when it
     // reports one. So an unbound gesture is untouched by this, and a bound one
     // cannot both run its action and fall through as a page turn.
-    {
+    //
+    // Not over a screen that keeps its contacts (Activity::keepsTouchContacts()): the light drawer's sliders follow
+    // a finger, and a drag along one read as the swipe bound to an action (from PR #855, trungtypo).
+    if (!activityManager.currentKeepsTouchContacts()) {
       BA gestureAction = BA::BTN_DEFAULT;
       if (gestureEventManager.consumeAction(gestureAction, activityManager.currentIsReaderActivity(),
                                             mirrorLeftRight) &&

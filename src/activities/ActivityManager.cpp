@@ -825,6 +825,12 @@ bool ActivityManager::currentIsReaderActivity() const {
 
 bool ActivityManager::currentMirrorsLeftRight() const { return currentActivity && currentActivity->mirrorsLeftRight(); }
 
+#if CP_TOUCH_UI
+bool ActivityManager::currentKeepsTouchContacts() const {
+  return currentActivity && currentActivity->keepsTouchContacts();
+}
+#endif
+
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
 
 bool ActivityManager::currentOwnsSerialInput() const { return currentActivity && currentActivity->ownsSerialInput(); }
