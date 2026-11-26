@@ -66,11 +66,13 @@ TEST(BookReaderOverrides, AFontSizeIsReadInTheNumberingItWasStoredIn) {
 
 TEST(BookReaderOverrides, ALineSpacingStepIsReadInTheNumberingItWasStoredIn) {
   BookReaderOverrides overrides;
-  // Before LINE_SPACING_ORDER_VERSION 1, 1 was Normal.
+  // Before LINE_SPACING_ORDER_VERSION 1, 1 was Normal; in version 1 it was 95%.
   overrides.setFromStored(Field::LineSpacing, 1, BookReaderOverrides::Numbering{kCurrent.fontSizeOrder, 0});
   EXPECT_EQ(overrides.get(Field::LineSpacing), static_cast<int8_t>(LineSpacingStep::Pct100));
-  overrides.setFromStored(Field::LineSpacing, 1, kCurrent);
+  overrides.setFromStored(Field::LineSpacing, 1, BookReaderOverrides::Numbering{kCurrent.fontSizeOrder, 1});
   EXPECT_EQ(overrides.get(Field::LineSpacing), static_cast<int8_t>(LineSpacingStep::Pct95));
+  overrides.setFromStored(Field::LineSpacing, 1, kCurrent);
+  EXPECT_EQ(overrides.get(Field::LineSpacing), static_cast<int8_t>(LineSpacingStep::Pct85));
 }
 
 TEST(BookReaderOverrides, AFamilyByNameWinsOverABuiltInOneWhicheverComesFirst) {

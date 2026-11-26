@@ -328,7 +328,9 @@ bool CrossPointSettings::loadFromFile() {
   return false;
 }
 
-static_assert(CrossPointSettings::LINE_SPACING_90 == static_cast<uint8_t>(LineSpacingStep::Pct90) &&
+static_assert(CrossPointSettings::LINE_SPACING_80 == static_cast<uint8_t>(LineSpacingStep::Pct80) &&
+                  CrossPointSettings::LINE_SPACING_85 == static_cast<uint8_t>(LineSpacingStep::Pct85) &&
+                  CrossPointSettings::LINE_SPACING_90 == static_cast<uint8_t>(LineSpacingStep::Pct90) &&
                   CrossPointSettings::LINE_SPACING_95 == static_cast<uint8_t>(LineSpacingStep::Pct95) &&
                   CrossPointSettings::LINE_SPACING_100 == static_cast<uint8_t>(LineSpacingStep::Pct100) &&
                   CrossPointSettings::LINE_SPACING_110 == static_cast<uint8_t>(LineSpacingStep::Pct110) &&
