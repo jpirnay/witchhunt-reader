@@ -65,7 +65,8 @@ do **not** transfer. Those are the `Panel_LCD` path. This is `Panel_EPD`, and it
 `waitDisplay()`, not `waitDMA()`.
 
 Measured full-refresh durations, for calibration: FAST ~1329-1559 ms (970-1130 ms since the fast
-bank shrank to `L[15]` rows, 2026-11-11), HALF ~2582-2950 ms. That is
+bank shrank to `L[15]` rows, 2026-11-11; 1170-1480 ms with the 10-frame push, 2026-11-26), HALF
+~2582-2950 ms. That is
 roughly 2-4x an X4 Pro and 3x an X3, and it is why several things that are affordable elsewhere
 are not affordable here.
 
@@ -104,7 +105,26 @@ erases the arrival state), then walk to the target. `clean_rows()` is `3 x L[15]
 
 The DU (fast) path needs no such compromise: DU is exactly `L[15]` frames of full drive, and epdiy's
 published DU phase counts for the same blob are our `L[15]` plus one in every range (epdiy counts a
-terminating phase). Two independent decoders agree, so the fast bank is as good as the vendor's.
+terminating phase). Two independent decoders agree, so the fast bank's rails are the vendor's.
+
+### The fast bank's push to the opposite rail
+
+The bare DU erases ink but not its edges. Switching Settings tabs on a T5 S3 Pro at 24 C left hollow
+outlines of the old tab's labels and doubled row lines, building up switch by switch until the menus'
+periodic Half. A FAST that drove every pixel (the first one after a Half) left them too, so the cause is
+the waveform, not the pixels the differential diff skips; a Half, whose clean bank goes through both
+rails, cleared them. Each rail column now drives `FAST_KICK_FRAMES` (10) toward the opposite rail
+before its `L[15]`. Seen with the user watching the panel, 2026-11-26:
+
+| push | first FAST after a Half (every pixel) | changed-pixels-only FAST | page turns |
+|---|---|---|---|
+| 0 (bare DU) | 1110 ms, clear outlines | 0.82-0.9 s, outlines build up | — |
+| 8 | 1406 ms, fainter outlines | 1.02-1.12 s, much better | right |
+| 10 | 1479 ms, none | 1.17 s, faint traces, no build-up | — |
+| 12 | 1553 ms, none | 1.21-1.23 s, faint traces, no build-up | right |
+
+The push is symmetric (a write and its erase still net zero) and a fixed count: only 24 C was looked at.
+It costs ~33 ms a frame on every FAST, page turns and the white flash ahead of a Half included.
 
 ### The text AA greys: measured, not derived
 
@@ -132,7 +152,8 @@ both lengths to the other ranges by their `L[15]`; only 24..27 C was measured. I
 columns on the canvas levels whose clean-bank columns land nearest those greys (13/14 in most
 ranges), so a Half refresh carries them as far as the vendor columns allow. The clean bank follows
 the same curve: at 24 C its level 13 walks 5 frames down (0.10) and level 14 walks 2 (0.55); every
-other grey level is black. The fast bank is now `L[15]` rows in every range. The boot line names it
+other grey level is black. The fast bank is `FAST_KICK_FRAMES + L[15]` rows in every range; its
+greys start at frame 0 and end inside the rails. The boot line names it
 all: `AA greys at level 13/14 (12 frames up, 3/2 down)`. `tools/test_gen_ed047tc2_waveform.py` in
 the SDK checks the generated tables against the generator.
 
@@ -143,8 +164,8 @@ negative, and bits 8-14 of that word select the block. So no block index may rea
 terminators included, must fit in 128 rows. Overrunning it fails silently and globally (refreshes
 stop completing; the panel looks dead). `gen_ed047tc2_waveform.py` asserts the end of the last bank
 against `LUT_ROW_BUDGET = 128`, counting the 4-row `lut_eraser`; the header of the generated
-`ED047TC2Waveform.cpp` states the worst case (104 rows today; a fourth clean phase would take it to
-exactly 128 at 15..18 C).
+`ED047TC2Waveform.cpp` states the worst case (114 rows with the fast bank's 10-frame push, at
+15..18 C; a fourth clean phase, +24, no longer fits).
 The boot line reports the budget in use (`[epd] LUT budget N/128 blocks`).
 
 `Panel_EPD::_lut_remain_table` is assigned but never read (only in commented-out logs); do not reason
