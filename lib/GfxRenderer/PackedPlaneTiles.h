@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "BitMatrix8.h"
+
 // 2-bit picture rows (MSB first, 0 black .. 3 white, the layout of a .pxc cache and of Bitmap::readNextRow) drawn
 // into a 1-bit plane a whole framebuffer byte at a time.
 //
@@ -49,10 +51,7 @@ inline uint32_t laneBits(const uint32_t w) {
   } else {
     f = w & hiOnLo;  // v == 3, white
   }
-  f &= 0x55555555u;
-  f = (f | (f >> 1)) & 0x33333333u;
-  f = (f | (f >> 2)) & 0x0F0F0F0Fu;
-  return (f | (f >> 4)) & 0x00FF00FFu;
+  return bit_matrix::gatherPairs(f);
 }
 
 // One framebuffer byte: `bits` (laneBits() for the op) written where `valid` is set, as writePixel() writes each.
@@ -110,34 +109,17 @@ void drawByteColumn(const uint8_t* const (&rows)[8], const int rowBytes, const i
     for (int lane = 0; lane < 8; lane++) {
       words[lane] = rows[lane] ? tileWord(rows[lane], rowBytes, column) : 0xFFFFu;
     }
-    // m[lane]: bit (7 - k) for pixel k of that lane.
-    uint32_t x = 0;
-    uint32_t y = 0;
-    for (int pair = 0; pair < 2; pair++) {
-      const uint32_t a = laneBits<op>((words[pair * 2] << 16) | words[pair * 2 + 1]);
-      const uint32_t b = laneBits<op>((words[4 + pair * 2] << 16) | words[4 + pair * 2 + 1]);
-      const int shift = 16 - pair * 16;  // lanes 0,1 (and 4,5) in the top two bytes
-      x |= (((a >> 16) << 8) | (a & 0xFFu)) << shift;
-      y |= (((b >> 16) << 8) | (b & 0xFFu)) << shift;
-    }
-    // 8 x 8 bit transpose (Hacker's Delight, transpose8rS32): byte k of the result, bit (7 - lane) = pixel k of lane.
-    uint32_t t = (x ^ (x >> 7)) & 0x00AA00AAu;
-    x = x ^ t ^ (t << 7);
-    t = (y ^ (y >> 7)) & 0x00AA00AAu;
-    y = y ^ t ^ (t << 7);
-    t = (x ^ (x >> 14)) & 0x0000CCCCu;
-    x = x ^ t ^ (t << 14);
-    t = (y ^ (y >> 14)) & 0x0000CCCCu;
-    y = y ^ t ^ (t << 14);
-    t = (x & 0xF0F0F0F0u) | ((y >> 4) & 0x0F0F0F0Fu);
-    y = ((x << 4) & 0xF0F0F0F0u) | (y & 0x0F0F0F0Fu);
-    x = t;
+    // Row `lane` of the matrix: bit (7 - k) for pixel k of that lane. Transposed, byte k holds pixel k of every lane.
+    uint32_t hi =
+        bit_matrix::rowsFromPairs(laneBits<op>((words[0] << 16) | words[1]), laneBits<op>((words[2] << 16) | words[3]));
+    uint32_t lo =
+        bit_matrix::rowsFromPairs(laneBits<op>((words[4] << 16) | words[5]), laneBits<op>((words[6] << 16) | words[7]));
+    bit_matrix::transpose(hi, lo);
 
     const int from = column < first ? first - column : 0;
     const int to = end - column < 8 ? end - column : 8;
     for (int k = from; k < to; k++) {
-      const uint8_t bits = static_cast<uint8_t>(k < 4 ? x >> (24 - k * 8) : y >> (56 - k * 8));
-      merge<op>(firstByte[(column + k - first) * columnStep], bits, valid);
+      merge<op>(firstByte[(column + k - first) * columnStep], bit_matrix::byteAt(hi, lo, k), valid);
     }
   }
 }
