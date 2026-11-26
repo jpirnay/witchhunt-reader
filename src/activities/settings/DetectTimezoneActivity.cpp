@@ -18,6 +18,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/WifiSessionEnd.h"
 #include "util/TimezoneDetectMap.h"
 #include "util/Timezones.h"
 
@@ -151,7 +152,8 @@ void DetectTimezoneActivity::onEnter() {
 void DetectTimezoneActivity::onExit() {
   Activity::onExit();
   HalClock::wifiOff();
-  if (wifiWasUsed_) {
+  // The C3s reboot; the PSRAM boards return to Clock settings in this boot while the heap allows.
+  if (wifiWasUsed_ && wifi_session::end("TZ") == wifi_session::Exit::Reboot) {
     silentRestartToClockSettings();
   }
 }

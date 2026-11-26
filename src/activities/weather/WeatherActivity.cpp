@@ -27,6 +27,7 @@
 #include "components/WeatherDraw.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "network/WifiSessionEnd.h"
 #include "util/ScreenshotUtil.h"
 
 namespace {
@@ -127,9 +128,8 @@ void WeatherActivity::onExit() {
   // given back here as a reader gives it back, so it does not stay under the next screen.
   renderer.releaseScaledGlyphCache();
 
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(false);
-    delay(30);
+  // The C3s reboot to Home; the PSRAM boards go there in this boot while the heap allows (the navigation is queued).
+  if (WiFi.getMode() != WIFI_MODE_NULL && wifi_session::end("WEATHER") == wifi_session::Exit::Reboot) {
     silentRestart();
   }
 }
@@ -212,7 +212,7 @@ void WeatherActivity::onWifiSelectionComplete(bool connected) {
     LOG_DBG("WEA", "state -> CHECK_WIFI (waitStart=%lu)", (unsigned long)wifiWaitStartedAtMs);
     requestUpdate(true);
   } else {
-    // Leave WiFi up; onExit's silent reboot handles teardown without further fragmenting.
+    // Leave WiFi up; onExit's session end (wifi_session::end()) tears it down.
     state = State::ERROR;
     errorMessage = tr(STR_WIFI_CONN_FAILED);
     requestUpdate();
