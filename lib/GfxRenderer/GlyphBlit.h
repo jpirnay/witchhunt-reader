@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "BitMatrix8.h"
+
 // The glyph blitters: a glyph's bitmap (1 or 2 bits per pixel, rows packed tight) drawn into a 1-bit plane several
 // pixels at a time, in each of the four orientations. GfxRenderer's text paths call them; GlyphBlitTest holds them to
 // a pixel-at-a-time draw.
@@ -58,15 +60,15 @@ enum class Frame : uint8_t { Portrait, LandscapeClockwise, PortraitInverted, Lan
 //
 //   For each 8-row × 8-column glyph block:
 //     1. Read 8 consecutive glyph rows (sequential bitmap access) into the
-//        top 8 bytes of a uint64_t (one bitmapExtract per row).
-//     2. Call transpose8x8() — an O(log 8) butterfly transform — to swap
-//        the role of rows and columns in 3 passes of XOR-masking.
-//     3. The resulting uint64_t holds 8 column bytes: byte k contains the
+//        rows of a bit matrix in two 32-bit words (one bitmapExtract per row).
+//     2. bit_matrix::transpose() (BitMatrix8.h) — an O(log 8) butterfly
+//        transform — swaps rows and columns in 3 passes of XOR-masking.
+//     3. The transposed matrix holds 8 column bytes: byte k contains the
 //        bits for glyph column glyphX+k, one per physical row, MSB-aligned.
 //     4. Write each column byte with writeRowBits() to its physical row.
 //
 // For PortraitInverted the glyph rows are packed in reverse order (last row
-// at MSB of the uint64_t) before transposing.  This ensures the post-transpose
+// in the matrix's row 0) before transposing.  This ensures the post-transpose
 // column bytes are already correctly ordered (MSB = leftmost phyX) without any
 // per-column bit-reversal step.
 //
@@ -81,30 +83,6 @@ inline uint8_t reverseBits8(uint8_t b) {
   b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
   b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
   return b;
-}
-
-// Transpose an 8×8 bit matrix packed into a uint64_t.
-//
-// Input layout (row-major, row 0 at MSB):
-//   bit (63 - 8*r - c)  =  matrix[r][c]   (r=row 0..7, c=col 0..7)
-//
-// After transposition:
-//   bit (63 - 8*c - r)  =  matrix[r][c]
-//   i.e. byte k = bits [63-8k .. 56-8k] holds column k, MSB = row 0.
-//
-// Uses the classic 3-pass butterfly (Warren, "Hacker's Delight" §7-3):
-//   pass 1 swaps adjacent bit-pairs across a stride of 7 (nibble level),
-//   pass 2 swaps across stride 14 (byte level),
-//   pass 3 swaps across stride 28 (half-word level).
-inline uint64_t transpose8x8(uint64_t x) {
-  uint64_t t;
-  t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AAULL;
-  x ^= t ^ (t << 7);
-  t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL;
-  x ^= t ^ (t << 14);
-  t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL;
-  x ^= t ^ (t << 28);
-  return x;
 }
 
 // Extract up to 8 bits from a 1-bit MSB-first packed bitmap starting at bit
@@ -144,10 +122,10 @@ inline uint8_t bitmapExtract(const uint8_t* bitmap, const int bitPos, const int 
 // A row↔column axis swap (reindex) is required before scattering.
 //
 // 1-bit pipeline
-//   gather  : extractGlyphBlock        reads an 8×8 glyph tile into a
-//                                      contiguous uint64_t block
+//   gather  : extractGlyphBlock        reads an 8×8 glyph tile into the rows
+//                                      of a bit matrix (two 32-bit words)
 //                                      (≈ glyphTensor[tile].contiguous())
-//   reindex : transpose8x8             swaps row↔column axes in the uint64_t;
+//   reindex : bit_matrix::transpose    swaps row↔column axes in the matrix;
 //                                      pure index transform, no data movement
 //   scatter : scatterBlockToFrameBuffer → writeRowBits
 //                                      writes each column-byte to its row
@@ -197,31 +175,37 @@ inline void writeRowBits(uint8_t* const row, const int phyBitPos, const uint8_t 
 }
 
 // 1-bit pipeline step 1 — gather: reads an up-to-8×8 tile from the glyph tensor
-// ([glyphHeight][glyphWidth], 1 bpp, row stride = glyphWidth bits) into a contiguous uint64_t.
+// ([glyphHeight][glyphWidth], 1 bpp, row stride = glyphWidth bits) into the rows of a bit matrix (BitMatrix8.h).
 // Equivalent to glyphTensor[glyphY:+rowCount, glyphX:+colCount].contiguous().
-// Byte 7 = first source row (MSB-aligned). reverseRows implements a negative-stride gather along Y
+// Row 0 = first source row (MSB-aligned). reverseRows implements a negative-stride gather along Y
 // (reads rows bottom-to-top), needed for PortraitInverted.
-// Full pipeline: extractGlyphBlock (gather) → transpose8x8 (reindex) → scatterBlockToFrameBuffer (scatter).
-inline uint64_t extractGlyphBlock(const uint8_t* const bitmap, const int stride, const int glyphX, const int glyphY,
-                                  const int rowCount, const int colCount, const bool reverseRows) {
-  uint64_t pack = 0;
+// Full pipeline: extractGlyphBlock (gather) → bit_matrix::transpose (reindex) → scatterBlockToFrameBuffer (scatter).
+inline void extractGlyphBlock(const uint8_t* const bitmap, const int stride, const int glyphX, const int glyphY,
+                              const int rowCount, const int colCount, const bool reverseRows, uint32_t& hi,
+                              uint32_t& lo) {
+  hi = 0;
+  lo = 0;
   int bitStart = glyphY * stride + glyphX;
   for (int n = 0; n < rowCount; n++, bitStart += stride) {
     const int slot = reverseRows ? (rowCount - 1 - n) : n;
-    pack |= static_cast<uint64_t>(bitmapExtract(bitmap, bitStart, colCount)) << (56 - 8 * slot);
+    const uint32_t row = bitmapExtract(bitmap, bitStart, colCount);
+    if (slot < 4) {
+      hi |= row << (24 - 8 * slot);
+    } else {
+      lo |= row << (56 - 8 * slot);
+    }
   }
-  return pack;
 }
 
 // 1-bit pipeline step 3 — scatter: writes column-bytes of the transposed block into framebuffer rows.
 // The framebuffer is a 2D tensor [DISPLAY_HEIGHT][DISPLAY_WIDTH_BYTES] with non-unit row stride;
 // phyYStride=±1 selects the traversal direction along Y (positive = top-to-bottom, negative = inverted).
 // Each column k maps to row (phyYBase + k*phyYStride) via writeRowBits.
-inline void scatterBlockToFrameBuffer(uint8_t* const frameBuffer, const uint64_t pack, const int colCount,
-                                      const int phyYBase, const int phyYStride, const int phyBitPos,
+inline void scatterBlockToFrameBuffer(uint8_t* const frameBuffer, const uint32_t hi, const uint32_t lo,
+                                      const int colCount, const int phyYBase, const int phyYStride, const int phyBitPos,
                                       const bool pixelState, const int displayHeight, const int widthBytes) {
   for (int k = 0; k < colCount; k++) {
-    const uint8_t cols_k = static_cast<uint8_t>(pack >> (56 - 8 * k));
+    const uint8_t cols_k = bit_matrix::byteAt(hi, lo, k);
     if (cols_k == 0) continue;
     const int phyY = phyYBase + k * phyYStride;
     if (phyY < 0 || phyY >= displayHeight) continue;
@@ -278,9 +262,11 @@ inline void draw1Bit(uint8_t* const frameBuffer, const uint8_t* const bitmap, co
         if (phyBitPos + rowCount <= 0 || phyBitPos >= displayWidth) continue;
         for (int glyphX = 0; glyphX < glyphWidth; glyphX += 8) {
           const int colCount = std::min(8, glyphWidth - glyphX);
-          const uint64_t pack =
-              transpose8x8(extractGlyphBlock(bitmap, glyphWidth, glyphX, glyphY, rowCount, colCount, false));
-          scatterBlockToFrameBuffer(frameBuffer, pack, colCount, displayHeight - 1 - screenXBase - glyphX, -1,
+          uint32_t hi;
+          uint32_t lo;
+          extractGlyphBlock(bitmap, glyphWidth, glyphX, glyphY, rowCount, colCount, false, hi, lo);
+          bit_matrix::transpose(hi, lo);
+          scatterBlockToFrameBuffer(frameBuffer, hi, lo, colCount, displayHeight - 1 - screenXBase - glyphX, -1,
                                     phyBitPos, pixelState, displayHeight, widthBytes);
         }
       }
@@ -294,9 +280,11 @@ inline void draw1Bit(uint8_t* const frameBuffer, const uint8_t* const bitmap, co
         if (phyBitPos + rowCount <= 0 || phyBitPos >= displayWidth) continue;
         for (int glyphX = 0; glyphX < glyphWidth; glyphX += 8) {
           const int colCount = std::min(8, glyphWidth - glyphX);
-          const uint64_t pack =
-              transpose8x8(extractGlyphBlock(bitmap, glyphWidth, glyphX, glyphY, rowCount, colCount, true));
-          scatterBlockToFrameBuffer(frameBuffer, pack, colCount, screenXBase + glyphX, 1, phyBitPos, pixelState,
+          uint32_t hi;
+          uint32_t lo;
+          extractGlyphBlock(bitmap, glyphWidth, glyphX, glyphY, rowCount, colCount, true, hi, lo);
+          bit_matrix::transpose(hi, lo);
+          scatterBlockToFrameBuffer(frameBuffer, hi, lo, colCount, screenXBase + glyphX, 1, phyBitPos, pixelState,
                                     displayHeight, widthBytes);
         }
       }
