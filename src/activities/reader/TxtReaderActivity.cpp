@@ -657,6 +657,7 @@ void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       if (currentPage < totalPages - 1) {
         currentPage++;
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -664,6 +665,7 @@ void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       if (currentPage > 0) {
         currentPage--;
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -674,6 +676,7 @@ void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       // cppcheck-suppress knownConditionTrueFalse
       if (currentPage != prevPage) {
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
       }
       requestUpdate();
       break;
@@ -685,6 +688,7 @@ void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       // cppcheck-suppress knownConditionTrueFalse
       if (currentPage != prevPage) {
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
       }
       requestUpdate();
       break;

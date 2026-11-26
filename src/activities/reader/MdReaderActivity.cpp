@@ -1176,6 +1176,7 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
         currentPage++;
         onPageChanged();
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -1184,6 +1185,7 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
         currentPage--;
         onPageChanged();
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
