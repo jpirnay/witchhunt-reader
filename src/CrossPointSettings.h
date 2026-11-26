@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "TouchUi.h"  // CP_TOUCH_UI
 #include "components/themes/PanelMetrics.h"
 #include "util/DictionaryRegistry.h"
 
@@ -21,6 +22,9 @@ class CrossPointSettings {
 
   void applyDeviceButtonDefaults();
   void applyDeviceDisplayDefaults();
+#if CP_TOUCH_UI
+  void applyDeviceTouchDefaults();
+#endif
 
  public:
   // Delete copy constructor and assignment
@@ -689,6 +693,7 @@ class CrossPointSettings {
   // among them (HalGPIO feeds it in as button edges, below the touch gate), and so does a key bound to
   // BTN_TOGGLE_TOUCH_LOCK. A finger on the glass does not keep the device awake while it is on. See TouchGate.h.
   uint8_t touchLock = 0;
+  // Activate Immediately on a board with a digitiser (applyDeviceTouchDefaults()); the row is shown only there.
   uint8_t touchListActivation = TOUCH_LIST_SELECT_THEN_ACTIVATE;
 
   // Bumped whenever the SHIPPED gesture defaults change. A stored value below

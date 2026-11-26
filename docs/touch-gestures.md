@@ -166,8 +166,8 @@ bottom edge returns Home.
   Switch it off with the same row, a key bound to **Toggle Touch Lock**, or on the BOOX Picco
   the slide switch set to *Touch* (**Settings → Controls → Slide Switch**): on is touch on,
   off is Touch Lock.
-- **Settings → Controls → Tap Action** chooses whether a tap on a list row selects it
-  (*Select, then activate*, the default) or opens it straight away.
+- **Settings → Controls → Tap Action** chooses whether a tap on a list row opens it straight
+  away (*Activate immediately*, the default) or selects it first (*Select, then activate*).
 - Any single gesture can be set to **Ignore (do nothing)** in *Gesture actions* to switch
   just that one off. That is how the centre tap for the reader bars is turned off: bind
   **Tap centre** to *Ignore*. There is no separate switch for it — the swipe up from the

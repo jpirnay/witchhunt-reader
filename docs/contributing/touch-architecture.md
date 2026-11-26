@@ -308,11 +308,13 @@ have a selection", not "does it call `drawList`".
 
 ### Point, then confirm
 
-A first tap on a row moves the selection there; a tap on the row already selected runs the action
-(`ListRowTap`, shared by both list paths). A mis-tap costs one more tap instead of an action to
-undo, and the first repaint is the feedback. The activating tap synthesizes a Confirm press rather
-than calling the action, so it runs the screen's own Confirm path. Users can switch to single-tap
-activation (`touchListActivation`).
+With *Select, then activate* (Tap Action, `touchListActivation`), a first tap on a row moves the
+selection there and a tap on the row already selected runs the action (`ListRowTap`, shared by both
+list paths). A mis-tap costs one more tap instead of an action to undo, and the first repaint is
+the feedback. The activating tap synthesizes a Confirm press rather than calling the action, so it
+runs the screen's own Confirm path. A touch board defaults to single-tap activation, *Activate
+immediately* (`CrossPointSettings::applyDeviceTouchDefaults()`), where the first tap is that
+activating tap; a saved choice wins.
 
 Do not act on touch-down. It is reported after 90 ms of contact (`TOUCH_DOWN_SELECT_DELAY_MS`),
 which an ordinary tap exceeds, so moving the selection on touch-down and acting on release costs
