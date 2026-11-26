@@ -1,6 +1,7 @@
 #include "SettingsActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
 #include <Logging.h>
@@ -288,12 +289,16 @@ void SettingsActivity::activateIndex(const int index) {
   const auto& setting = (*currentSettings)[index];
   if (setting.isSeparator) return;
 
+  const uint8_t themeBefore = SETTINGS.uiTheme;
+  const uint8_t fontSizeBefore = SETTINGS.uiFontSize;
+
   if (setting.usesSelectorActivity) {
     auto selector = createSelectorActivity(setting, renderer, mappedInput);
     if (selector) {
-      startActivityForResult(std::move(selector), [this](const ActivityResult&) {
+      startActivityForResult(std::move(selector), [this, themeBefore, fontSizeBefore](const ActivityResult&) {
         CrossPointSettings::normalizeDependentSettings(SETTINGS);
         SETTINGS.saveToFile();
+        applyUiLookIfChanged(themeBefore, fontSizeBefore);
         needsHalfRefresh = true;
         rebuildRowsIfShownChanged();
       });
@@ -349,6 +354,7 @@ void SettingsActivity::activateIndex(const int index) {
   setting.toggleValue();
   CrossPointSettings::normalizeDependentSettings(SETTINGS);
   SETTINGS.saveToFile();
+  applyUiLookIfChanged(themeBefore, fontSizeBefore);
   // Last use of `setting`: a rebuild replaces the row it refers to.
   rebuildRowsIfShownChanged();
   // Repaint: nothing else will. Every other way this list changes asks for an
@@ -362,6 +368,24 @@ void SettingsActivity::activateIndex(const int index) {
   // Whole-screen rather than the one row on purpose: normalizeDependentSettings()
   // may have changed other rows' values as well.
   requestUpdate();
+}
+
+// Until a change showed only once Settings closed, and on the C3s it still does (HalCapabilities::defersUiLookChange).
+// onExit() applies both everywhere, also for a change the web page or the serial SET made meanwhile. Under the
+// exclusive lock: reload() replaces the theme object, which a render pass in flight is still reading, and the render
+// task drops the plain mutex mid-pass. From PR #855 (trungtypo), which did this for the font size on every board and
+// for the theme on one.
+void SettingsActivity::applyUiLookIfChanged(const uint8_t themeBefore, const uint8_t fontSizeBefore) {
+  if (HalCapabilities::defersUiLookChange()) return;
+  if (SETTINGS.uiTheme == themeBefore && SETTINGS.uiFontSize == fontSizeBefore) return;
+  {
+    RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
+    // A pair, as in onExit(): the ladder binds the UI fonts and reload() re-derives the metrics sized to hold them.
+    applyUiFontScale();
+    UITheme::getInstance().reload();
+    resetUi();
+  }
+  needsHalfRefresh = true;
 }
 
 void SettingsActivity::materializeListWindow() {

@@ -401,6 +401,18 @@ bool sendsSleepEventsFromCleanBoot();
 inline bool sendsSleepEventsFromCleanBoot() { return !keepsSecondaryBuffer(); }
 #endif
 
+// A new UI theme or UI font size waits for Settings to close (SettingsActivity::onExit), rather than laying the open
+// screen out again at once (SettingsActivity::applyUiLookIfChanged). The C3s, for now: the live change replaces the
+// theme object and binds the UI fonts again with the screens below Settings still resident, which nobody has measured
+// on the X4's heap yet (docs/future_work/memory-and-parsing/c3-heap-for-the-live-ui-theme-and-font-size.md). The PSRAM
+// boards change at once (T5S3: Settings at 109 KB internal free before and after a theme and a font size round trip,
+// 2026-11-26). cppcheck sees only the declaration, as above.
+#if defined(CPPCHECK_ANALYSIS)
+bool defersUiLookChange();
+#else
+inline bool defersUiLookChange() { return !keepsSecondaryBuffer(); }
+#endif
+
 // A frontlight is present: PWM (LEDC or PM1-driven), or an LED driver on the I2C bus (the BOOX Picco's).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight(); }
 
