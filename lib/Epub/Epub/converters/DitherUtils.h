@@ -6,26 +6,54 @@
 #include <new>
 
 // 4x4 Bayer matrix for ordered dithering
-inline const uint8_t bayer4x4[4][4] = {
+inline constexpr uint8_t bayer4x4[4][4] = {
     {0, 8, 2, 10},
     {12, 4, 14, 6},
     {3, 11, 1, 9},
     {15, 7, 13, 5},
 };
 
-inline uint8_t quantizeGray4Level(uint8_t gray) { return gray >= 213 ? 3 : static_cast<uint8_t>((gray + 42) / 85); }
+constexpr uint8_t quantizeGray4Level(uint8_t gray) { return gray >= 213 ? 3 : static_cast<uint8_t>((gray + 42) / 85); }
 
-// Apply Bayer dithering and quantize to 4 levels (0-3)
+namespace bayer4_detail {
+
+// A cell's offset, (bayer - 8) * 5, is -40..35: about half the quantization step of 85 either way.
+constexpr int kLowestOffset = -40;
+constexpr int kOffsetSpan = 75;
+
+// What applyBayerDither4Level() reads. The level of clamp(gray + offset) depends on the sum alone: quantizeGray4Level()
+// steps at 43, 128 and 213, all inside 0..255, so the clamp never moves a sum across a step. So a cell keeps its
+// offset, shifted to 0..75, and `level` holds the level of every sum from -40 to 290, shifted the same way: per pixel
+// two table reads, where the clamps and the quantization took compares, branches and a division by 85.
+struct Tables {
+  uint8_t offset[4][4];
+  uint8_t level[256 + kOffsetSpan];
+};
+
+constexpr Tables makeTables() {
+  Tables t{};
+  for (int y = 0; y < 4; y++) {
+    for (int x = 0; x < 4; x++) {
+      t.offset[y][x] = static_cast<uint8_t>((bayer4x4[y][x] - 8) * 5 - kLowestOffset);
+    }
+  }
+  for (int i = 0; i < 256 + kOffsetSpan; i++) {
+    int sum = i + kLowestOffset;
+    if (sum < 0) sum = 0;
+    if (sum > 255) sum = 255;
+    t.level[i] = quantizeGray4Level(static_cast<uint8_t>(sum));
+  }
+  return t;
+}
+
+inline constexpr Tables kTables = makeTables();
+
+}  // namespace bayer4_detail
+
+// Apply Bayer dithering and quantize to 4 levels (0-3): quantizeGray4Level(clamp(gray + (bayer - 8) * 5)).
 // Stateless - works correctly with any pixel processing order
 inline uint8_t applyBayerDither4Level(uint8_t gray, int x, int y) {
-  int bayer = bayer4x4[y & 3][x & 3];
-  int dither = (bayer - 8) * 5;  // Scale to +/-40 (half of quantization step 85)
-
-  int adjusted = gray + dither;
-  if (adjusted < 0) adjusted = 0;
-  if (adjusted > 255) adjusted = 255;
-
-  return quantizeGray4Level((uint8_t)adjusted);
+  return bayer4_detail::kTables.level[gray + bayer4_detail::kTables.offset[y & 3][x & 3]];
 }
 
 #ifdef ENABLE_IMAGE_DITHERING_EXTENSION
