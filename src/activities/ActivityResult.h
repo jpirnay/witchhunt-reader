@@ -152,7 +152,8 @@ struct ReaderBarsResult {
     Search,
     Orientation,
     SyncPull,
-    SyncPush
+    SyncPush,
+    Light
   };
   Action action = Action::None;
   // Action::Orientation: the one chosen, a CrossPointSettings::ORIENTATION.

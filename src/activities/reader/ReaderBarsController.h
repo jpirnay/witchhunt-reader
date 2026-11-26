@@ -11,7 +11,8 @@
 class GfxRenderer;
 class MappedInputManager;
 
-// The reader bars: a top bar (back out of the book, its title, the page's star) and a tab bar
+// The reader bars: a top bar (back out of the book, its title, the page's star, the reading light where the board has
+// one) and a tab bar
 // (Navigation, Progress, Layout, Orientation, More, an icon each) painted over the page the reader left on the panel,
 // which stays readable between them. Opened by Confirm, a tap in the middle of the page, or a tap on the status bar
 // (EpubReaderActivity::openReaderBars).
@@ -58,6 +59,8 @@ class ReaderBarsController final : private UiAppHost {
     // Orientation offers Auto-Rotate (the board has an IMU), and whether it is on.
     bool hasAutoRotate = false;
     bool autoRotate = false;
+    // The top bar offers the light drawer (the board has a reading light, and the drawer to set it).
+    bool hasLight = false;
   };
 
   // What one input pass asks of the host: nothing, a redraw, the Layout tab's values applied, or the bars gone,

@@ -18,7 +18,8 @@ arrangement, the idea only; none of its code.
 
 ## The bars (#747, #762)
 
-- **Top bar:** back out of the book, the book's title (opens the book's details), the page's bookmark.
+- **Top bar:** back out of the book, the book's title (opens the book's details), the page's bookmark, and on a board
+  with a reading light the light drawer's button beside it (from PR #855, trungtypo).
 - **Tab bar,** an icon each: Navigation (the chapter list, the bookmarks, a printed page, leaving the book), Progress
   (where the book and the chapter stand, the time spent in the book, previous chapter / Go to % / next chapter, and
   KOReader sync where it is set up), Layout (below), Orientation (the four ways to hold it, and Auto-Rotate on a board
