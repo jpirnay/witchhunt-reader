@@ -47,3 +47,37 @@ TEST(MinuteTick, TheScreenMaySkipAMinuteEitherWay) {
   EXPECT_FALSE(MinuteTick::redraws(true, true, skips));
   EXPECT_EQ(skips.asked, 3);
 }
+
+// A frame the minute tick alone asked for is clock-only (it does not spend the menus' ghost-clearing count);
+// any other request for the same frame makes it an ordinary one.
+TEST(ClockOnlyFrame, TheTickAloneIsClockOnly) {
+  MinuteTick::ClockOnlyFrame frame;
+  frame.tick(/*othersAsked=*/false);
+  EXPECT_TRUE(frame.takeForPass());
+}
+
+TEST(ClockOnlyFrame, AFrameAskedForBeforeTheTickIsNot) {
+  MinuteTick::ClockOnlyFrame frame;
+  frame.other();
+  frame.tick(/*othersAsked=*/true);
+  EXPECT_FALSE(frame.takeForPass());
+}
+
+TEST(ClockOnlyFrame, ARequestAfterTheTickMakesItOrdinary) {
+  MinuteTick::ClockOnlyFrame frame;
+  frame.tick(/*othersAsked=*/false);
+  frame.other();  // a tab switch before the render task took the pass
+  EXPECT_FALSE(frame.takeForPass());
+}
+
+TEST(ClockOnlyFrame, EachTickAnswersOnePass) {
+  MinuteTick::ClockOnlyFrame frame;
+  frame.tick(/*othersAsked=*/false);
+  EXPECT_TRUE(frame.takeForPass());
+  EXPECT_FALSE(frame.takeForPass());  // the next pass, for a button, counts
+}
+
+TEST(ClockOnlyFrame, NothingAskedIsNotClockOnly) {
+  MinuteTick::ClockOnlyFrame frame;
+  EXPECT_FALSE(frame.takeForPass());
+}
