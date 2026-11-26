@@ -14,10 +14,11 @@
  * On enter: loads cache -> if stale, connects WiFi -> fetches data -> displays.
  * Each successful fetch also saves the forecast to SLEEP_IMAGE_PATH for the sleep screen.
  * Keys: Back = return, Confirm = open settings, Left = refresh.
+ * Without a location it shows LOCATION_REQUIRED instead: Back, or Confirm into the settings.
  */
 class WeatherActivity final : public Activity {
  public:
-  enum class State { LOADING_CACHE, CHECK_WIFI, WIFI_SELECTION, FETCHING, WEATHER_DISPLAY, ERROR };
+  enum class State { LOADING_CACHE, LOCATION_REQUIRED, CHECK_WIFI, WIFI_SELECTION, FETCHING, WEATHER_DISPLAY, ERROR };
 
   // In the folder SleepActivity picks custom sleep images from.
   static constexpr char SLEEP_IMAGE_PATH[] = "/sleep/weather.bmp";
