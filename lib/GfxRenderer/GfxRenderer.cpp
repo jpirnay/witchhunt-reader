@@ -1989,9 +1989,8 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
 // we write up to 8 pixels at a time directly to the framebuffer using writeRowBits.
 //
 // Source data: readNextRow always produces a 2-bit packed row (4px/byte, MSB-first,
-// raw values 0=white 1=light-gray 2=dark-gray 3=black).  The same
-// build2BitRowMaskFromTwoBytes / build2BitRowMask / build2BitColMask helpers used
-// for 2-bit glyphs apply here with no changes.
+// raw values 0=white 1=light-gray 2=dark-gray 3=black).  The row-mask helpers
+// build2BitRowMaskFromTwoBytes / build2BitRowMask (GlyphBlit.h) apply here with no changes.
 //
 // Fast path is taken only when !isScaled.  Scaled images fall through to the
 // per-pixel drawPixel loop unchanged.
