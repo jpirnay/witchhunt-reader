@@ -63,4 +63,48 @@ TEST(ToggleNoticeGate, MeasuresTheWaitAcrossTheClockWrapping) {
   EXPECT_EQ(step(a, now(100)), Step::Paint);
 }
 
+using ToggleNoticeGate::Clear;
+using ToggleNoticeGate::clear;
+using ToggleNoticeGate::kShowMs;
+using ToggleNoticeGate::Shown;
+
+Shown shown() {
+  Shown s;
+  s.atMs = 1000;
+  s.activityChanges = 7;
+  s.renderPasses = 20;
+  return s;
+}
+
+// Issue #930: in a book nothing draws until the next page turn, so the message has to take itself down.
+TEST(ToggleNoticeGate, StaysUpThenAsksTheScreenForAFrame) {
+  EXPECT_EQ(clear(shown(), now(1000)), Clear::Keep);
+  EXPECT_EQ(clear(shown(), now(1000 + kShowMs - 1)), Clear::Keep);
+  EXPECT_EQ(clear(shown(), now(1000 + kShowMs)), Clear::Redraw);
+}
+
+// A page turn, a move in a list: that frame drew over it, and a second one would only cost a refresh.
+TEST(ToggleNoticeGate, IsGoneOnceTheScreenDrewAgain) {
+  EXPECT_EQ(clear(shown(), now(1200, /*renderPasses=*/21)), Clear::Gone);
+  EXPECT_EQ(clear(shown(), now(1000 + kShowMs, /*renderPasses=*/21)), Clear::Gone);
+}
+
+TEST(ToggleNoticeGate, IsGoneOnAnotherScreen) {
+  EXPECT_EQ(clear(shown(), now(1200, 20, false, /*activityChanges=*/8)), Clear::Gone);
+}
+
+// Busy: a frame is already on its way, or the panel's frame is lent to a chapter build. Waited for, not given up.
+TEST(ToggleNoticeGate, WaitsForABusyScreenBeforeAskingForAFrame) {
+  EXPECT_EQ(clear(shown(), now(1000 + kShowMs, 20, /*busy=*/true)), Clear::Keep);
+  EXPECT_EQ(clear(shown(), now(1000 + 4 * kShowMs, 20, /*busy=*/true)), Clear::Keep);
+  EXPECT_EQ(clear(shown(), now(1000 + 4 * kShowMs, 20, /*busy=*/false)), Clear::Redraw);
+}
+
+TEST(ToggleNoticeGate, MeasuresTheTimeUpAcrossTheClockWrapping) {
+  Shown s = shown();
+  s.atMs = static_cast<unsigned long>(-500);
+  EXPECT_EQ(clear(s, now(100)), Clear::Keep);
+  EXPECT_EQ(clear(s, now(kShowMs - 500)), Clear::Redraw);
+}
+
 }  // namespace
