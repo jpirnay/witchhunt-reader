@@ -539,4 +539,172 @@ inline void draw2Bit(uint8_t* const frameBuffer, const uint8_t* const bitmap, co
   }
 }
 
+// One plane draw2BitPlanes() draws a glyph into: rows [originY, originY + rows) of the panel, held in `buffer`.
+struct Plane {
+  uint8_t* buffer;
+  int originY;
+  int rows;
+  uint8_t
+      drawMask;  // the raw values it draws: bit N for raw N, 1 light gray .. 3 black; a glyph's white is never drawn
+  bool black;    // clears the bits it draws (black); otherwise sets them, as a white pen and every gray plane do
+};
+
+namespace detail {
+
+constexpr int kMaxPlanes = 3;
+
+// Each inked level's flag for two words of 2-bit pixels (one in each half), in the pixels' low bits as inkPairs()
+// leaves them before gathering.
+struct Levels {
+  uint32_t light;  // raw 1
+  uint32_t dark;   // raw 2
+  uint32_t black;  // raw 3
+};
+
+inline Levels levelsOf(const uint32_t w) {
+  const uint32_t hiOnLo = w >> 1;  // each pixel's high bit moved onto its low bit
+  return {w & ~hiOnLo, hiOnLo & ~w, w & hiOnLo};
+}
+
+// A plane's mask as one whole-word mask per level, so that its flags are an AND-OR of the levels': the gray planes'
+// masks follow the text darkness setting, known only at run time.
+struct LevelSelect {
+  uint32_t light;
+  uint32_t dark;
+  uint32_t black;
+};
+
+inline LevelSelect levelSelect(const uint8_t drawMask) {
+  return {(drawMask & 0x02) ? ~0u : 0u, (drawMask & 0x04) ? ~0u : 0u, (drawMask & 0x08) ? ~0u : 0u};
+}
+
+// inkPairs() for a plane whose mask is a LevelSelect.
+inline uint32_t planePairs(const Levels& l, const LevelSelect& s) {
+  return bit_matrix::gatherPairs((l.light & s.light) | (l.dark & s.dark) | (l.black & s.black));
+}
+
+template <bool inverted>
+inline void draw2BitPlanesPortrait(const Plane* const planes, const LevelSelect* const select, const int count,
+                                   const uint8_t* const bitmap, const int glyphWidth, const int glyphHeight,
+                                   const int screenXBase, const int screenYBase, const int displayWidth,
+                                   const int displayHeight, const int widthBytes) {
+  const int bytes = (glyphWidth * glyphHeight + 3) / 4;
+  for (int glyphY = 0; glyphY < glyphHeight; glyphY += 8) {
+    const int blockRows = std::min(8, glyphHeight - glyphY);
+    const int phyBitPos =
+        inverted ? (displayWidth - 1 - screenYBase - (glyphY + blockRows - 1)) : (screenYBase + glyphY);
+    if (phyBitPos + blockRows <= 0 || phyBitPos >= displayWidth) continue;
+    for (int glyphX = 0; glyphX < glyphWidth; glyphX += 8) {
+      const int cols = std::min(8, glyphWidth - glyphX);
+      // As draw2BitPortrait(): matrix row r is glyph row glyphY + r, bottom-up for PortraitInverted.
+      uint32_t words[8] = {};
+      uint32_t any = 0;
+      int p = glyphY * glyphWidth + glyphX;
+      for (int r = 0; r < blockRows; r++, p += glyphWidth) {
+        const uint32_t w = glyphWord2Bit(bitmap, bytes, p, cols);
+        words[inverted ? blockRows - 1 - r : r] = w;
+        any |= w;
+      }
+      if (any == 0) continue;
+      const Levels levels[4] = {levelsOf((words[0] << 16) | words[1]), levelsOf((words[2] << 16) | words[3]),
+                                levelsOf((words[4] << 16) | words[5]), levelsOf((words[6] << 16) | words[7])};
+      for (int i = 0; i < count; i++) {
+        uint32_t hi = bit_matrix::rowsFromPairs(planePairs(levels[0], select[i]), planePairs(levels[1], select[i]));
+        uint32_t lo = bit_matrix::rowsFromPairs(planePairs(levels[2], select[i]), planePairs(levels[3], select[i]));
+        if ((hi | lo) == 0) continue;
+        bit_matrix::transpose(hi, lo);
+        const Plane& plane = planes[i];
+        for (int k = 0; k < cols; k++) {
+          const uint8_t bits = bit_matrix::byteAt(hi, lo, k);
+          if (bits == 0) continue;
+          const int screenX = screenXBase + glyphX + k;
+          const int rowY = (inverted ? screenX : (displayHeight - 1 - screenX)) - plane.originY;
+          if (static_cast<unsigned>(rowY) >= static_cast<unsigned>(plane.rows)) continue;
+          writeRowBits(plane.buffer + rowY * widthBytes, phyBitPos, bits, plane.black, widthBytes);
+        }
+      }
+    }
+  }
+}
+
+template <bool reversed>
+inline void draw2BitPlanesLandscape(const Plane* const planes, const LevelSelect* const select, const int count,
+                                    const uint8_t* const bitmap, const int glyphWidth, const int glyphHeight,
+                                    const int screenXBase, const int screenYBase, const int displayWidth,
+                                    const int displayHeight, const int widthBytes) {
+  const int bytes = (glyphWidth * glyphHeight + 3) / 4;
+  for (int glyphY = 0; glyphY < glyphHeight; glyphY++) {
+    const int phyY = reversed ? (displayHeight - 1 - (screenYBase + glyphY)) : (screenYBase + glyphY);
+    uint8_t* rows[kMaxPlanes];
+    bool anyRow = false;
+    for (int i = 0; i < count; i++) {
+      const int rowY = phyY - planes[i].originY;
+      rows[i] = static_cast<unsigned>(rowY) < static_cast<unsigned>(planes[i].rows)
+                    ? planes[i].buffer + rowY * widthBytes
+                    : nullptr;
+      anyRow |= rows[i] != nullptr;
+    }
+    if (!anyRow) continue;
+    const int rowStartPixel = glyphY * glyphWidth;
+    // LandscapeCounterClockwise runs the chunks left to right; LandscapeClockwise right to left, each chunk's flags
+    // reversed, as draw2Bit() does.
+    for (int chunk = 0; chunk < glyphWidth; chunk += 8) {
+      const int chunkStart = reversed ? std::max(0, glyphWidth - 8 - chunk) : chunk;
+      const int count8 = reversed ? (glyphWidth - chunk) - chunkStart : std::min(8, glyphWidth - chunk);
+      const uint32_t w = glyphWord2Bit(bitmap, bytes, rowStartPixel + chunkStart, count8);
+      if (w == 0) continue;
+      const int phyBitPos =
+          reversed ? (displayWidth - 1 - screenXBase - (chunkStart + count8 - 1)) : (screenXBase + chunkStart);
+      if (phyBitPos + count8 <= 0 || phyBitPos >= displayWidth) continue;
+      const Levels levels = levelsOf(w);
+      for (int i = 0; i < count; i++) {
+        if (rows[i] == nullptr) continue;
+        const uint8_t forward = static_cast<uint8_t>(planePairs(levels, select[i]));
+        if (forward == 0) continue;
+        const uint8_t bits = reversed ? reverseBits8(forward >> (8 - count8)) : forward;
+        writeRowBits(rows[i], phyBitPos, bits, planes[i].black, widthBytes);
+      }
+    }
+  }
+}
+
+}  // namespace detail
+
+// draw2Bit() into each of `count` planes (at most three) at once, each with its own mask, pen and band: the frame and
+// the two gray planes a one-pass page captures. Every block of the glyph is read and split into its levels once for
+// all of them, where three draw2Bit() calls read it three times. A plane with nothing to draw is skipped.
+inline void draw2BitPlanes(const Plane* const planes, const int count, const uint8_t* const bitmap,
+                           const int glyphWidth, const int glyphHeight, const int screenXBase, const int screenYBase,
+                           const Frame orientation, const int displayWidth, const int displayHeight,
+                           const int widthBytes) {
+  Plane active[detail::kMaxPlanes];
+  detail::LevelSelect select[detail::kMaxPlanes];
+  int n = 0;
+  for (int i = 0; i < count && i < detail::kMaxPlanes; i++) {
+    if ((planes[i].drawMask & 0x0E) == 0 || planes[i].buffer == nullptr) continue;
+    active[n] = planes[i];
+    select[n] = detail::levelSelect(planes[i].drawMask);
+    n++;
+  }
+  if (n == 0) return;
+  switch (orientation) {
+    case Frame::Portrait:
+      detail::draw2BitPlanesPortrait<false>(active, select, n, bitmap, glyphWidth, glyphHeight, screenXBase,
+                                            screenYBase, displayWidth, displayHeight, widthBytes);
+      break;
+    case Frame::PortraitInverted:
+      detail::draw2BitPlanesPortrait<true>(active, select, n, bitmap, glyphWidth, glyphHeight, screenXBase, screenYBase,
+                                           displayWidth, displayHeight, widthBytes);
+      break;
+    case Frame::LandscapeCounterClockwise:
+      detail::draw2BitPlanesLandscape<false>(active, select, n, bitmap, glyphWidth, glyphHeight, screenXBase,
+                                             screenYBase, displayWidth, displayHeight, widthBytes);
+      break;
+    case Frame::LandscapeClockwise:
+      detail::draw2BitPlanesLandscape<true>(active, select, n, bitmap, glyphWidth, glyphHeight, screenXBase,
+                                            screenYBase, displayWidth, displayHeight, widthBytes);
+      break;
+  }
+}
+
 }  // namespace glyph_blit

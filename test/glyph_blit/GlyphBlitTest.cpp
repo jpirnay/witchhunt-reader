@@ -100,18 +100,22 @@ bool bit1(const Glyph& g, const int x, const int y) {
   return (g.bytes[p >> 3] >> (7 - (p & 7))) & 1;
 }
 
-// A 2-bit glyph pixel is drawn where bit `raw` of the plane's mask is set; the B/W plane (0x0E) takes the pen's colour,
-// a gray plane always sets the bit.
-std::vector<uint8_t> model2Bit(const uint8_t drawMask, const Frame f, const Glyph& g, const int x, const int y,
-                               const bool black, const Band band, const uint32_t frameSeed) {
+// A 2-bit glyph pixel is drawn where bit `raw` of the plane's mask is set, black (bit cleared) or white (bit set).
+std::vector<uint8_t> modelPlane(const uint8_t drawMask, const bool state, const Frame f, const Glyph& g, const int x,
+                                const int y, const Band band, const uint32_t frameSeed) {
   std::vector<uint8_t> frame = randomFrame(frameSeed, band);
-  const bool state = drawMask == 0x0E && black;
   for (int gy = 0; gy < g.height; gy++) {
     for (int gx = 0; gx < g.width; gx++) {
       if ((drawMask >> raw2Bit(g, gx, gy)) & 1) modelPixel(frame, band, f, x + gx, y + gy, state);
     }
   }
   return frame;
+}
+
+// draw2Bit(): the B/W plane (0x0E) takes the pen's colour, a gray plane always sets the bit.
+std::vector<uint8_t> model2Bit(const uint8_t drawMask, const Frame f, const Glyph& g, const int x, const int y,
+                               const bool black, const Band band, const uint32_t frameSeed) {
+  return modelPlane(drawMask, drawMask == 0x0E && black, f, g, x, y, band, frameSeed);
 }
 
 std::vector<uint8_t> blit2Bit(const uint8_t drawMask, const Frame f, const Glyph& g, const int x, const int y,
@@ -248,4 +252,53 @@ TEST(GlyphBlit, OneBitGlyphsOfEverySizeLeaveThePerPixelFrame) {
       }
     }
   }
+}
+
+// draw2BitPlanes(): one glyph into up to three planes at once (the frame and the two gray planes a one-pass page
+// captures) must leave each plane as drawing it alone does, whatever each plane's mask, pen colour and band.
+TEST(GlyphBlit, TwoBitGlyphsIntoSeveralPlanesLeaveEachPlanesFrame) {
+  std::mt19937 rng(0x3B1Au);
+  // The masks drawMaskFor2BitMode() gives, for every text darkness, then any mask of the three inked levels.
+  constexpr uint8_t kMsb[] = {0x02, 0x06, 0x06, 0x00, 0x06};
+  constexpr uint8_t kLsb[] = {0x04, 0x04, 0x06, 0x00, 0x00};
+  const Band bands[] = {{0, kPanelH}, {13, 9}, {5, 0}};
+  int drawn = 0;
+  for (const Frame f : kFrames) {
+    for (int i = 0; i < 600; i++) {
+      const int width = 1 + static_cast<int>(rng() % 37);
+      const int height = 1 + static_cast<int>(rng() % 37);
+      const Glyph g = randomGlyph(rng, width, height, 2);
+      const int x = randomPen(rng, kPanelW);
+      const int y = randomPen(rng, kPanelW);
+      const int darkness = i % 7;
+      const uint8_t masks[3] = {
+          0x0E,
+          darkness < 5 ? kMsb[darkness] : static_cast<uint8_t>(rng() & 0x0E),
+          darkness < 5 ? kLsb[darkness] : static_cast<uint8_t>(rng() & 0x0E),
+      };
+      const bool states[3] = {(rng() & 1) != 0, (rng() & 1) != 0, false};
+      const Band planeBands[3] = {bands[rng() % 3], {0, kPanelH}, bands[rng() % 3]};
+      const uint32_t seeds[3] = {rng(), rng(), rng()};
+      const int count = 1 + static_cast<int>(rng() % 3);
+
+      std::vector<uint8_t> frames[3];
+      glyph_blit::Plane planes[3];
+      for (int p = 0; p < 3; p++) {
+        frames[p] = randomFrame(seeds[p], planeBands[p]);
+        planes[p] = {frames[p].data() + kWidthBytes, planeBands[p].originY, planeBands[p].rows, masks[p], states[p]};
+      }
+      glyph_blit::draw2BitPlanes(planes, count, g.bytes.data(), width, height, x, y, f, kPanelW, kPanelH, kWidthBytes);
+      for (int p = 0; p < 3; p++) {
+        // A plane past `count` is not drawn at all.
+        const std::vector<uint8_t> expected = p < count
+                                                  ? modelPlane(masks[p], states[p], f, g, x, y, planeBands[p], seeds[p])
+                                                  : randomFrame(seeds[p], planeBands[p]);
+        ASSERT_EQ(expected, frames[p]) << "plane " << p << " of " << count << " mask " << static_cast<int>(masks[p])
+                                       << " frame " << static_cast<int>(f) << " glyph " << width << "x" << height
+                                       << " at " << x << "," << y;
+      }
+      drawn++;
+    }
+  }
+  EXPECT_EQ(4 * 600, drawn);
 }

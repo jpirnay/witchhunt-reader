@@ -484,45 +484,34 @@ static void drawResolvedGlyph(const GfxRenderer& renderer, GfxRenderer::RenderMo
         const int fbRows = renderer.getWriteRows();
         switch (drawMask) {
           case 0x0E:  // BW
+            // Inline grayscale capture: the same glyph into each anti-aliasing plane as well, with that plane's own
+            // draw mask. This is the whole point of the capture — the page walk, the layout and the glyph decode
+            // above happened ONCE, and drawing into the planes here is what makes a second and third full page
+            // render unnecessary. draw2BitPlanes() reads the glyph once for the frame and both planes.
+            //
+            // Masks come from drawMaskFor2BitMode() so the planes honour the darkness setting exactly as the
+            // staged passes did. Darkness "Maximum" yields 0x00 for both, and draw2BitPlanes() skips a plane with
+            // nothing to draw — the BW pass has already drawn every AA pixel solid black there, which is what that
+            // setting means. The planes are full-panel, so origin 0 / full height regardless of any band the
+            // framebuffer write is using.
+            if (renderer.grayCaptureActive()) {
+              const uint8_t darkness = renderer.getTextDarkness();
+              const int planeRows = static_cast<int>(renderer.getDisplayHeight());
+              const glyph_blit::Plane planes[] = {
+                  {fb, fbOriginY, fbRows, 0x0E, pixelState},
+                  {renderer.grayCaptureMsb(), 0, planeRows, drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, darkness),
+                   false},
+                  {renderer.grayCaptureLsb(), 0, planeRows, drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, darkness),
+                   false},
+              };
+              glyph_blit::draw2BitPlanes(planes, 3, bitmap, width, height, innerBase, outerBase,
+                                         frameOf(renderer.getOrientation()), renderer.getDisplayWidth(),
+                                         renderer.getDisplayHeight(), renderer.getDisplayWidthBytes());
+              break;
+            }
             glyph_blit::draw2Bit<0x0E>(fb, bitmap, width, height, innerBase, outerBase, pixelState,
                                        frameOf(renderer.getOrientation()), renderer.getDisplayWidth(),
                                        renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), fbOriginY, fbRows);
-            // Inline grayscale capture: the same glyph, blitted again into each
-            // anti-aliasing plane with that plane's own draw mask. This is the
-            // whole point of the capture — the page walk, the layout and the
-            // glyph decode above happened ONCE, and re-running only the blit is
-            // what makes a second and third full page render unnecessary.
-            //
-            // Masks come from drawMaskFor2BitMode() so the planes honour the
-            // darkness setting exactly as the staged passes did. Darkness
-            // "Maximum" yields 0x00 for both, which the guards below skip — the
-            // BW pass has already drawn every AA pixel solid black there, which
-            // is what that setting means.
-            if (renderer.grayCaptureActive()) {
-              const uint8_t msbMask = drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, renderer.getTextDarkness());
-              const uint8_t lsbMask = drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, renderer.getTextDarkness());
-              const int planeRows = static_cast<int>(renderer.getDisplayHeight());
-              // Planes are full-panel, so origin 0 / full height regardless of
-              // any band the framebuffer write is using.
-              if (msbMask == 0x06) {
-                glyph_blit::draw2Bit<0x06>(renderer.grayCaptureMsb(), bitmap, width, height, innerBase, outerBase,
-                                           pixelState, frameOf(renderer.getOrientation()), renderer.getDisplayWidth(),
-                                           renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
-              } else if (msbMask == 0x02) {
-                glyph_blit::draw2Bit<0x02>(renderer.grayCaptureMsb(), bitmap, width, height, innerBase, outerBase,
-                                           pixelState, frameOf(renderer.getOrientation()), renderer.getDisplayWidth(),
-                                           renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
-              }
-              if (lsbMask == 0x06) {
-                glyph_blit::draw2Bit<0x06>(renderer.grayCaptureLsb(), bitmap, width, height, innerBase, outerBase,
-                                           pixelState, frameOf(renderer.getOrientation()), renderer.getDisplayWidth(),
-                                           renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
-              } else if (lsbMask == 0x04) {
-                glyph_blit::draw2Bit<0x04>(renderer.grayCaptureLsb(), bitmap, width, height, innerBase, outerBase,
-                                           pixelState, frameOf(renderer.getOrientation()), renderer.getDisplayWidth(),
-                                           renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
-              }
-            }
             break;
           case 0x06:  // raw {1,2}
             glyph_blit::draw2Bit<0x06>(fb, bitmap, width, height, innerBase, outerBase, pixelState,
