@@ -72,6 +72,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   static constexpr size_t MENU_TAB_COUNT = static_cast<size_t>(MenuTab::Count);
 
   void buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages, bool verticalAllowed);
+  void rebuildSyncItems();
   [[nodiscard]] MenuTab activeTab() const { return visibleTabs[selectedTab()]; }
   [[nodiscard]] size_t activeTabIndex() const { return static_cast<size_t>(activeTab()); }
   [[nodiscard]] std::vector<SettingInfo>& activeMenuItems() { return tabMenuItems[activeTabIndex()]; }

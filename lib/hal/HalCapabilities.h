@@ -355,6 +355,17 @@ inline bool keepsSecondaryBuffer() {
 #endif
 }
 
+// The reader menu's Sync tab without a KOReader account: one row that opens the KOReader settings over the book
+// (EpubReaderMenuActivity::rebuildSyncItems). The C3s, for now, keep the tab for an account that is set up, as before:
+// the settings and their keyboard over the reader and its menu have not been measured on the X4's heap
+// (docs/future_work/memory-and-parsing/c3-heap-for-kosync-setup-from-the-reader-menu.md). The PSRAM boards offer it.
+// cppcheck, which reads one board's build, sees only the declaration and checks both sides.
+#if defined(CPPCHECK_ANALYSIS)
+bool offersSyncSetupInReader();
+#else
+inline bool offersSyncSetupInReader() { return keepsSecondaryBuffer(); }
+#endif
+
 // A chapter build lays out in PSRAM, in a region of its own (Section::setOwnedBuildRegionBytes) or in the arena lent in
 // place of the secondary buffer, so it touches neither frame buffer nor the heap the reader draws from: the page the
 // build shows can get its gray while the build goes on, from the secondary buffer (BuildPageGray.h, Pass::Restore). Not

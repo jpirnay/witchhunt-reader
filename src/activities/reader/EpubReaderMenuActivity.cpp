@@ -120,16 +120,17 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                                             bool verticalAllowed) {
   auto& navigationItems = tabMenuItems[static_cast<size_t>(MenuTab::Navigation)];
   auto& settingsItems = tabMenuItems[static_cast<size_t>(MenuTab::Settings)];
-  auto& syncItems = tabMenuItems[static_cast<size_t>(MenuTab::Sync)];
   auto& toolsItems = tabMenuItems[static_cast<size_t>(MenuTab::Tools)];
   navigationItems.reserve(8);
   settingsItems.reserve(13);
-  syncItems.reserve(3);
   toolsItems.reserve(8);
 
   visibleTabs[visibleTabCount++] = MenuTab::Navigation;
   visibleTabs[visibleTabCount++] = MenuTab::Settings;
-  if (KOREADER_STORE.hasCredentials()) visibleTabs[visibleTabCount++] = MenuTab::Sync;
+  // Without an account the tab is the way to set one up (rebuildSyncItems()), where the board offers that.
+  if (HalCapabilities::offersSyncSetupInReader() || KOREADER_STORE.hasCredentials()) {
+    visibleTabs[visibleTabCount++] = MenuTab::Sync;
+  }
   visibleTabs[visibleTabCount++] = MenuTab::Tools;
 
   navigationItems.push_back(SettingInfo::Action(StrId::STR_SELECT_CHAPTER, SettingAction::None));
@@ -409,13 +410,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
             threeStateOverrideFromSlot(v);
       }));
 
-  if (KOREADER_STORE.hasCredentials()) {
-    syncItems.push_back(SettingInfo::Action(StrId::STR_PULL_PROGRESS_FROM_OTHER_DEVICES, SettingAction::None));
-    syncItems.push_back(SettingInfo::Action(StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE, SettingAction::None));
-    // The same comparison a long Confirm press in the reader starts: show which side is further and
-    // let the user choose, instead of forcing one direction.
-    syncItems.push_back(SettingInfo::Action(StrId::STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES, SettingAction::None));
-  }
+  rebuildSyncItems();
 
   toolsItems.push_back(SettingInfo::Action(StrId::STR_BOOK_INFO, SettingAction::None));
   toolsItems.push_back(SettingInfo::Action(StrId::STR_READING_STATS_FOR_THIS_BOOK, SettingAction::None));
@@ -427,6 +422,24 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
 #if ENABLE_BENCHMARKS
   toolsItems.push_back(SettingInfo::Action(StrId::STR_RENDER_BENCHMARK, SettingAction::None));
 #endif  // ENABLE_BENCHMARKS
+}
+
+// With an account: pull, push, compare. Without one, where the board offers it (HalCapabilities::
+// offersSyncSetupInReader()): the KOReader settings, where it is set up; the tab is built again when they close
+// (onActionSelected()). From PR #855 (trungtypo), where it was one board's.
+void EpubReaderMenuActivity::rebuildSyncItems() {
+  auto& syncItems = tabMenuItems[static_cast<size_t>(MenuTab::Sync)];
+  syncItems.clear();
+  if (KOREADER_STORE.hasCredentials()) {
+    syncItems.reserve(3);
+    syncItems.push_back(SettingInfo::Action(StrId::STR_PULL_PROGRESS_FROM_OTHER_DEVICES, SettingAction::None));
+    syncItems.push_back(SettingInfo::Action(StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE, SettingAction::None));
+    // The same comparison a long Confirm press in the reader starts: show which side is further and
+    // let the user choose, instead of forcing one direction.
+    syncItems.push_back(SettingInfo::Action(StrId::STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES, SettingAction::None));
+  } else if (HalCapabilities::offersSyncSetupInReader()) {
+    syncItems.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
+  }
 }
 
 EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId nameId) {
@@ -538,6 +551,25 @@ void EpubReaderMenuActivity::openAutoTurnPicker() {
 
 void EpubReaderMenuActivity::onActionSelected(int index) {
   const auto& item = activeMenuItems()[index];
+
+  // Over the book, so Back comes back here. The account check from there gets the heap a check from Settings gets:
+  // where it ends in a restart it replaces every screen, the book included (KOReaderSettingsActivity).
+  if (item.action == SettingAction::KOReaderSync) {
+    // The tapped row's flash would stay on it, over the rows the tab is rebuilt with (T5S3).
+    app.clearTapFlash();
+    auto setup = createActivityForAction(SettingAction::KOReaderSync, renderer, mappedInput);
+    if (setup) {
+      startActivityForResult(std::move(setup), [this](const ActivityResult&) {
+        {
+          RenderLock lock(*this);
+          rebuildSyncItems();
+        }
+        resetPublishedWindow();
+        focusTabs();
+      });
+    }
+    return;
+  }
 
   // Auto page turn stays in the menu: the reader starts it when the menu closes.
   if (item.nameId == StrId::STR_AUTO_TURN_SECONDS) {
