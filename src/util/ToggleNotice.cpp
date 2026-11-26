@@ -22,6 +22,27 @@ struct Pending {
 };
 Pending pending;
 
+// The message painted and not yet drawn over.
+bool onPanel = false;
+ToggleNoticeGate::Shown shown;
+
+void takeDownWhenDue(const ToggleNoticeGate::Now& now) {
+  switch (ToggleNoticeGate::clear(shown, now)) {
+    case ToggleNoticeGate::Clear::Keep:
+      return;
+    case ToggleNoticeGate::Clear::Gone:
+      onPanel = false;
+      return;
+    case ToggleNoticeGate::Clear::Redraw:
+      onPanel = false;
+      // The screen's own frame takes it down: in a book the page on the panel drawn again, as a clock tick draws it
+      // (a fast refresh, not billed to the ghosting budget), with its gray planes.
+      activityManager.requestUpdate();
+      LOG_DBG("TGL", "Message taken down");
+      return;
+  }
+}
+
 }  // namespace
 
 namespace ToggleNotice {
@@ -37,7 +58,7 @@ void show(const StrId name, const bool on, const bool afterFrame) {
 }
 
 void service(GfxRenderer& renderer) {
-  if (!pending.armed) return;
+  if (!pending.armed && !onPanel) return;
   ToggleNoticeGate::Now now;
   now.ms = millis();
   now.activityChanges = activityManager.activityChangeCount();
@@ -45,6 +66,13 @@ void service(GfxRenderer& renderer) {
   // Also waits while the secondary buffer is lent out (a chapter build on the C3s): the frame on the panel cannot be
   // put back in the write buffer then, and the box would go up on a stale frame (ActivityManager::showBusyIndicator()).
   now.busy = activityManager.busyReason(/*includeBackground=*/false) != nullptr || !renderer.hasSecondaryBuffer();
+
+  // Nothing to paint: the message on the panel comes down when due. One still to paint goes first and replaces it.
+  if (!pending.armed) {
+    takeDownWhenDue(now);
+    return;
+  }
+
   switch (ToggleNoticeGate::step(pending.asked, now)) {
     case ToggleNoticeGate::Step::Wait:
       return;
@@ -67,6 +95,12 @@ void service(GfxRenderer& renderer) {
   if (renderer.keepsPreviousFrame()) renderer.syncWriteBufferFromDisplayed();
   activityManager.prepareFramebufferForCapture();
   GUI.drawPopup(renderer, text, /*overlayDisplayedFrame=*/false);
+  // Timed from the end of the refresh that put it up. The counts are the ones read before it: no render pass starts
+  // while this holds the lock, so a frame asked for meanwhile counts as one that drew over the message.
+  onPanel = true;
+  shown.atMs = millis();
+  shown.activityChanges = now.activityChanges;
+  shown.renderPasses = now.renderPasses;
   LOG_DBG("TGL", "Message shown (%s)", pending.on ? "on" : "off");
 }
 

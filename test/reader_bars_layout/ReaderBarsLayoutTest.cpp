@@ -2,8 +2,9 @@
 // with no panel, Progress and Layout open.
 //
 // What it holds: every control lies on a bar and on the screen; a strip of the page stays in view between the bars;
-// each action is there once; touch boards get finger-sized Progress buttons; and onBars() answers for exactly the bars,
-// so a tap on the page between them closes them and a tap on a control does not.
+// each action is there once; the top bar's controls keep clear of each other; touch boards get finger-sized Progress
+// buttons; and onBars() answers for exactly the bars, so a tap on the page between them closes them and a tap on a
+// control does not. The touch boards are laid out with the light's button, which every lit board has.
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -78,6 +79,7 @@ Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
   Laid laid;
   laid.area = screen.contentRect();
   laid.model.title = "A Rather Long Book Title That Will Not Fit";
+  laid.model.showLight = board.touch;
   laid.model.panel = panel;
   laid.model.bookLabel = "Book";
   laid.model.bookValue = "47%";
@@ -309,11 +311,12 @@ TEST(ReaderBarsLayout, TheLayoutSheetsKeysGoBackTheWayTheyCame) {
 }
 
 TEST(ReaderBarsLayout, EachActionIsThereOnce) {
-  forEveryLayout([](const Board&, const Laid& laid) {
+  forEveryLayout([](const Board& board, const Laid& laid) {
     const size_t topBar = rb::coversPage(laid.model, laid.metrics, laid.area.height) ? 0u : 1u;
     EXPECT_EQ(countOf(laid, rb::Button::Exit), topBar);
     EXPECT_EQ(countOf(laid, rb::Button::Star), topBar);
     EXPECT_EQ(countOf(laid, rb::Button::Info), topBar);
+    EXPECT_EQ(countOf(laid, rb::Button::Light), board.touch ? topBar : 0u);
     EXPECT_EQ(countOf(laid, rb::ACTION_TAB), rb::kTabCount);
     const size_t progress = laid.model.panel == rb::Panel::Progress ? 1u : 0u;
     EXPECT_EQ(countOf(laid, rb::Button::PrevChapter), progress);
@@ -341,6 +344,25 @@ TEST(ReaderBarsLayout, EachActionIsThereOnce) {
   });
 }
 
+// The title, back, the star and the light share the top bar: none lies over another, so a tap there hits one.
+TEST(ReaderBarsLayout, TheTopBarsControlsKeepClearOfEachOther) {
+  forEveryLayout([](const Board&, const Laid& laid) {
+    const fui::Rect top = rb::topRect(laid.area, laid.model, laid.metrics);
+    std::vector<fui::Rect> controls;
+    for (const auto& hit : laid.hits) {
+      if (hit.action == rb::ACTION_BAR && hit.rect.y < top.bottom()) controls.push_back(hit.rect);
+    }
+    for (size_t i = 0; i < controls.size(); ++i) {
+      for (size_t j = i + 1; j < controls.size(); ++j) {
+        const fui::Rect& a = controls[i];
+        const fui::Rect& b = controls[j];
+        const bool apart = a.right() <= b.x || b.right() <= a.x || a.bottom() <= b.y || b.bottom() <= a.y;
+        EXPECT_TRUE(apart) << "controls " << i << " and " << j << " overlap";
+      }
+    }
+  });
+}
+
 TEST(ReaderBarsLayout, TouchBoardsGetFingerSizedPanelButtons) {
   forEveryLayout([](const Board& board, const Laid& laid) {
     if (!board.touch || laid.model.panel == rb::Panel::None || laid.model.panel == rb::Panel::Layout) return;
@@ -348,7 +370,10 @@ TEST(ReaderBarsLayout, TouchBoardsGetFingerSizedPanelButtons) {
     for (const auto& hit : laid.hits) {
       if (hit.action != rb::ACTION_BAR) continue;
       const auto button = static_cast<rb::Button>(hit.value);
-      if (button == rb::Button::Exit || button == rb::Button::Star || button == rb::Button::Info) continue;
+      if (button == rb::Button::Exit || button == rb::Button::Star || button == rb::Button::Info ||
+          button == rb::Button::Light) {
+        continue;
+      }
       EXPECT_GE(hit.rect.height, minTouch) << "button " << hit.value;
       EXPECT_GE(hit.rect.width, minTouch) << "button " << hit.value;
     }

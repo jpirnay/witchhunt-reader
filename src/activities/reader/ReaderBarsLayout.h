@@ -9,13 +9,15 @@
 
 #include "ReaderLayoutSheet.h"
 #include "components/icons/readerBarIcons.h"
+#include "components/icons/sunIcons.h"
 
 // The reader bars' layout, kept out of ReaderBarsController so that it needs FreeInkUI and nothing else of the
 // firmware's: the controller draws it, and test/reader_bars_layout lays it out at every board's size in both
 // orientations.
 //
 // Two bands over the page, which stays standing between them:
-//  - the top bar: back out of the book on the left, the book's title, the page's star on the right;
+//  - the top bar: back out of the book on the left, the book's title, the page's star on the right, and on a board
+//    with a reading light the light drawer's button beside the star;
 //  - the bottom band: the tab bar (Navigation, Progress, Layout, Orientation, More: an icon each) and the open panel
 //    above it: Navigation (the chapter list, the starred pages, a printed page, leaving the book), Progress (where the
 //    book and the chapter stand, the time spent in the book, previous chapter / Go to % / next chapter, and KOReader
@@ -34,9 +36,9 @@ namespace fui = freeink::ui;
 constexpr fui::ActionId ACTION_BAR = 1;  // the value is the Button
 constexpr fui::ActionId ACTION_TAB = 3;  // the value is the Tab
 
-// The bars' own buttons: the top bar's three (the title opens the book's details), Progress's chapter row and sync row,
-// and the rows of the Navigation and Orientation lists. The four orientations in CrossPointSettings::ORIENTATION's
-// order, from Portrait; then Auto-Rotate, on a board with an IMU.
+// The bars' own buttons: the top bar's three (the title opens the book's details) and the light where there is one,
+// Progress's chapter row and sync row, and the rows of the Navigation and Orientation lists. The four orientations in
+// CrossPointSettings::ORIENTATION's order, from Portrait; then Auto-Rotate, on a board with an IMU.
 enum class Button : uint8_t {
   Exit,
   Star,
@@ -56,6 +58,7 @@ enum class Button : uint8_t {
   Inverted,
   LandscapeCcw,
   AutoRotate,
+  Light,
 };
 
 enum class Tab : uint8_t { Navigation, Progress, Layout, Orientation, More, Count };
@@ -76,7 +79,8 @@ enum class Focus : uint8_t {
   Title,
   SyncPull,
   SyncPush,
-  List
+  List,
+  Light
 };
 
 // The panel open above the tab bar.
@@ -94,6 +98,9 @@ constexpr uint8_t kMaxListRows = 5;
 struct Model {
   const char* title = nullptr;
   bool starred = false;
+  // The light drawer's button beside the star, on a board with a reading light: the reader says so, the bars ask no
+  // board.
+  bool showLight = false;
   Panel panel = Panel::None;
   Focus focus = Focus::None;
   Tab focusedTab = Tab::Navigation;  // the tab under the cursor while focus is Tabs
@@ -324,15 +331,16 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
   const fui::Paint white = fui::Paint::solid(fui::Color::White);
   const fui::Paint black = fui::Paint::solid(fui::Color::Black);
 
-  // The top bar: the title, kept clear of the two square buttons at its ends, and the rule under it. Drawn as text and
-  // a fill rather than through fui::header, whose battery and clock chrome would come along unused (2.5 KB on a C3).
+  // The top bar: the title, kept clear of the square buttons at its ends (the light's beside the star), and the rule
+  // under it. Drawn as text and a fill rather than through fui::header, whose battery and clock chrome would come along
+  // unused (2.5 KB on a C3).
   const fui::Rect top = topRect(area, model, metrics);
   if (top.height > 0) {
     target.fill(top, white);
     target.fill(fui::Rect{top.x, static_cast<int16_t>(top.bottom() - metrics.rule), top.width, metrics.rule}, black);
     // The title between the two buttons: a tap there opens the book's details. Inverted under the keys' cursor.
     const fui::Rect title{static_cast<int16_t>(top.x + metrics.topBar), top.y,
-                          static_cast<int16_t>(top.width - 2 * metrics.topBar),
+                          static_cast<int16_t>(top.width - (model.showLight ? 3 : 2) * metrics.topBar),
                           static_cast<int16_t>(metrics.topBar - metrics.rule)};
     const bool titleFocused = model.focus == Focus::Title;
     if (titleFocused) target.fill(title.inset(fui::Insets{4, 0, 4, 0}), black, 8);
@@ -347,6 +355,14 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
                Button::Exit, model.focus == Focus::Exit);
     iconButton(screen, fui::Rect{static_cast<int16_t>(top.right() - theme.spaceSm - square), squareY, square, square},
                model.starred ? icon_star_filled_32 : icon_star_32, Button::Star, model.focus == Focus::Star);
+    // The light drawer, one square further in: the reading light from the book without the top-edge swipe (from
+    // PR #855, trungtypo).
+    if (model.showLight) {
+      iconButton(screen,
+                 fui::Rect{static_cast<int16_t>(top.right() - metrics.topBar - theme.spaceSm - square), squareY, square,
+                           square},
+                 icon_sun_32, Button::Light, model.focus == Focus::Light);
+    }
   }
 
   // The bottom band: the rule along its top edge, the tab bar along its bottom one.

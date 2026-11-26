@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "TouchUi.h"  // CP_TOUCH_UI
 #include "components/themes/PanelMetrics.h"
 #include "util/DictionaryRegistry.h"
 
@@ -21,6 +22,9 @@ class CrossPointSettings {
 
   void applyDeviceButtonDefaults();
   void applyDeviceDisplayDefaults();
+#if CP_TOUCH_UI
+  void applyDeviceTouchDefaults();
+#endif
 
  public:
   // Delete copy constructor and assignment
@@ -395,11 +399,20 @@ class CrossPointSettings {
   // docs/contributing/touch-architecture.md, "Gating").
   enum TOUCH_READER_CONTROLS {
     TOUCH_READER_OFF = 0,
-    TOUCH_READER_ON = 1,            // tap the outer thirds: left = back, right = forward
-    TOUCH_READER_SWIPE = 2,         // horizontal swipes turn pages; taps stay free
-    TOUCH_READER_INVERTED_TAP = 3,  // mirrored tap zones
+    TOUCH_READER_ON = 1,             // tap the outer thirds: left = back, right = forward
+    TOUCH_READER_SWIPE = 2,          // horizontal swipes turn pages; taps stay free
+    TOUCH_READER_INVERTED_TAP = 3,   // mirrored tap zones
+    TOUCH_READER_TAP_AND_SWIPE = 4,  // the tap zones and horizontal swipes both turn pages
     TOUCH_READER_CONTROLS_COUNT
   };
+  // Which contacts turn a page in `mode`: the reader (ReaderUtils::detectTouchPageTurn) and the gesture labels
+  // (TouchGestures::builtinLabelFor, the Gesture Actions overview) read the modes through these two, so they agree.
+  static constexpr bool touchReaderTapsTurnPages(const uint8_t mode) {
+    return mode == TOUCH_READER_ON || mode == TOUCH_READER_INVERTED_TAP || mode == TOUCH_READER_TAP_AND_SWIPE;
+  }
+  static constexpr bool touchReaderSwipesTurnPages(const uint8_t mode) {
+    return mode == TOUCH_READER_SWIPE || mode == TOUCH_READER_TAP_AND_SWIPE;
+  }
 
   // Text darkness for AA glyph rendering (forwarded to GfxRenderer::setTextDarkness)
   enum TEXT_DARKNESS {
@@ -680,6 +693,7 @@ class CrossPointSettings {
   // among them (HalGPIO feeds it in as button edges, below the touch gate), and so does a key bound to
   // BTN_TOGGLE_TOUCH_LOCK. A finger on the glass does not keep the device awake while it is on. See TouchGate.h.
   uint8_t touchLock = 0;
+  // Activate Immediately on a board with a digitiser (applyDeviceTouchDefaults()); the row is shown only there.
   uint8_t touchListActivation = TOUCH_LIST_SELECT_THEN_ACTIVATE;
 
   // Bumped whenever the SHIPPED gesture defaults change. A stored value below

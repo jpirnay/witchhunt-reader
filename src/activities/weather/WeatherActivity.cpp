@@ -136,8 +136,8 @@ void WeatherActivity::onExit() {
 
 void WeatherActivity::loadAndDisplay() {
   if (!WEATHER_SETTINGS.hasLocation()) {
-    state = State::ERROR;
-    errorMessage = tr(STR_WEATHER_NO_LOCATION);
+    // Not an error: nothing has gone wrong yet, and a refresh cannot help. Offer the settings instead.
+    state = State::LOCATION_REQUIRED;
     requestUpdate();
     return;
   }
@@ -186,14 +186,20 @@ void WeatherActivity::checkAndConnectWifi() {
 
 void WeatherActivity::launchWifiSelection() {
   state = State::WIFI_SELECTION;
-  requestUpdate();
+  // WifiSelectionActivity draws in whatever orientation it is handed, and this screen holds the panel in landscape:
+  // hand it portrait, as openSettingsActivity() does for the settings (from PR #855, trungtypo). No frame of this
+  // screen in between: the picker draws over it at once.
+  {
+    RenderLock lock(*this);
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  }
 
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
 void WeatherActivity::onWifiSelectionComplete(bool connected) {
-  // Re-apply landscape after returning from WiFi selection (which uses portrait)
+  // Back to landscape after the picker, which launchWifiSelection() gave portrait.
   {
     RenderLock lock(*this);
     renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
@@ -293,6 +299,15 @@ void WeatherActivity::loop() {
     return;  // Handled by WifiSelectionActivity
   }
 
+  if (state == State::LOCATION_REQUIRED) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      openSettingsActivity();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      onGoHome();
+    }
+    return;
+  }
+
   if (state == State::ERROR) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       openSettingsActivity();
@@ -353,7 +368,19 @@ void WeatherActivity::render(RenderLock&&) {
 
   const auto pageHeight = renderer.getScreenHeight();  // 480 in landscape
 
-  if (state == State::LOADING_CACHE || (state == State::FETCHING && (!showRefreshPopup || !weatherData.valid))) {
+  if (state == State::LOCATION_REQUIRED) {
+    renderer.drawCenteredText(FIT_TITLE_FONT_ID, pageHeight / 2 - 20, tr(STR_WEATHER), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(FIT_BODY_FONT_ID, pageHeight / 2 + 10, tr(STR_WEATHER_NO_LOCATION));
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_WEATHER_SETTINGS_SHORT), "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  // Waiting on the network with no cache: the forecast below would draw an empty one (from PR #855, trungtypo).
+  const bool waitingWithoutData = !weatherData.valid && (state == State::CHECK_WIFI || state == State::WIFI_SELECTION);
+  if (state == State::LOADING_CACHE || waitingWithoutData ||
+      (state == State::FETCHING && (!showRefreshPopup || !weatherData.valid))) {
     renderer.drawCenteredText(FIT_TITLE_FONT_ID, pageHeight / 2, tr(STR_LOADING));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

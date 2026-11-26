@@ -51,6 +51,8 @@ class SliderPickerActivity : public Activity {
 #if CP_TOUCH_UI
   // The slider follows a finger sideways, from the left edge too.
   bool backsOutOnEdgeSwipe() const override { return false; }
+  // The slider follows a finger: a drag along it is not the swipe a gesture is bound to.
+  bool keepsTouchContacts() const override { return true; }
 #endif
 
  private:

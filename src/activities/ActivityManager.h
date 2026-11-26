@@ -279,6 +279,14 @@ class ActivityManager {
   bool currentIsReaderActivity() const;
   // The activity on top reverses Left/Right (Activity::mirrorsLeftRight()).
   bool currentMirrorsLeftRight() const;
+  // The activity on top keeps every contact from the bound gestures (Activity::keepsTouchContacts()). Without the touch
+  // layer there are none: inline false, so the C3 builds lose nothing to it. cppcheck, which reads one board's build,
+  // sees only the declaration and checks both sides of main.cpp's condition (as HalCapabilities' predicates do).
+#if CP_TOUCH_UI || defined(CPPCHECK_ANALYSIS)
+  bool currentKeepsTouchContacts() const;
+#else
+  bool currentKeepsTouchContacts() const { return false; }
+#endif
   bool skipLoopDelay() const;
 
   // True while the current activity owns the raw serial input stream (see

@@ -55,10 +55,10 @@ const std::string& actionText(const GestureTexts& texts, const Gesture gesture) 
   return texts[static_cast<size_t>(gesture)];
 }
 
-// Whether a sideways swipe currently turns pages. Only Swipe reading mode uses horizontal
-// swipes for that; in the tap modes the centre third does nothing at all, and saying so is more
+// Whether a sideways swipe currently turns pages. Only the two swipe modes (Swipe, Tap Zones + Swipe) use
+// horizontal swipes for that; in the tap modes the centre third does nothing at all, and saying so is more
 // useful than implying a page turn that will not happen.
-bool swipeTurnsPagesNow() { return SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE; }
+bool swipeTurnsPagesNow() { return CrossPointSettings::touchReaderSwipesTurnPages(SETTINGS.touchReaderControls); }
 
 // Up to three lines of text centred in a box, each clipped to it. Every region on both pages is
 // labelled this way, so the clipping, the centring and the vertical block-centring are stated
