@@ -2366,8 +2366,7 @@ void loop() {
         case BA::BTN_TOGGLE_DARK_MODE:
           flipDarkMode();
           LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
-          // After the frame in the new polarity, which flipDarkMode() asked for.
-          ToggleNotice::show(StrId::STR_DARK_MODE, DarkModeNow::isDark(), /*afterFrame=*/true);
+          // No ToggleNotice: the panel inverted shows it (#930).
           break;
         case BA::BTN_TOGGLE_TOUCH_LOCK:
           SETTINGS.touchLock = SETTINGS.touchLock ? 0 : 1;
@@ -2387,12 +2386,12 @@ void loop() {
         // dispatchButtonAction() because it is not the activity's business, and
         // it is as useful on the home screen as it is mid-page. The level is
         // persisted so it survives the next boot; the panel is not redrawn,
-        // because nothing on it changed.
+        // because nothing on it changed. No ToggleNotice either: the light
+        // itself shows it (#930).
         case BA::BTN_LIGHT_TOGGLE:
           Frontlight.setOn(!Frontlight.isOn());
           SETTINGS.frontlightOn = Frontlight.isOn() ? 1 : 0;
           SETTINGS.saveToFile();
-          ToggleNotice::show(StrId::STR_READING_LIGHT, Frontlight.isOn(), /*afterFrame=*/false);
           break;
         case BA::BTN_LIGHT_BRIGHTER:
         case BA::BTN_LIGHT_DIMMER: {

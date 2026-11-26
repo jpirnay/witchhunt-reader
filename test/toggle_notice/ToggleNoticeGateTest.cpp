@@ -1,4 +1,4 @@
-// ToggleNoticeGate::step: when the message a toggle action asked for ("Dark Mode: On") goes on the panel, waits, or is
+// ToggleNoticeGate::step: when the message a toggle action asked for ("Touch Lock: On") goes on the panel, waits, or is
 // given up.
 #include <gtest/gtest.h>
 
@@ -30,7 +30,7 @@ Now now(const unsigned long ms, const uint32_t renderPasses = 20, const bool bus
   return n;
 }
 
-// Touch Lock, the reading light: nothing on the screen changes, so the message goes up as soon as the screen is idle.
+// Touch Lock, Touch Navigation: nothing on the screen changes, so the message goes up as soon as the screen is idle.
 TEST(ToggleNoticeGate, PaintsOnAnIdleScreen) { EXPECT_EQ(step(asked(false), now(1000)), Step::Paint); }
 
 TEST(ToggleNoticeGate, WaitsWhileTheScreenIsBusy) {
@@ -38,7 +38,7 @@ TEST(ToggleNoticeGate, WaitsWhileTheScreenIsBusy) {
   EXPECT_EQ(step(asked(false), now(1400, 20, /*busy=*/false)), Step::Paint);
 }
 
-// Dark Mode, a page laid out again: the frame the switch asked for would draw over a message painted before it.
+// Auto Page Turn, a page laid out again: the frame the switch asked for would draw over a message painted before it.
 TEST(ToggleNoticeGate, WaitsForTheFrameTheSwitchAskedFor) {
   EXPECT_EQ(step(asked(true), now(1100, /*renderPasses=*/20)), Step::Wait);
   EXPECT_EQ(step(asked(true), now(1300, 21, /*busy=*/true)), Step::Wait);

@@ -9826,9 +9826,8 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
                                  bookSdFontFamilyOverride, bookFontSizeOverride,
                                  static_cast<int8_t>(getEffectiveBionicReading() ? 0 : 1),
                                  bookParagraphAlignmentOverride);
+        // No ToggleNotice: the page laid out again shows it (#930).
         requestUpdate();
-        // Over the page laid out again.
-        ToggleNotice::show(StrId::STR_BIONIC_READING, getEffectiveBionicReading(), /*afterFrame=*/true);
       }
       break;
     case BA::BTN_CYCLE_FONT_SIZE:
