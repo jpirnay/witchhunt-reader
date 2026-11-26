@@ -43,6 +43,9 @@ class SettingsActivity final : public TabbedUiListActivity {
   std::array<ShownAnswer, MAX_SHOWN_ANSWERS> shownAnswers{};
   size_t shownAnswerCount = 0;
   void rebuildRowsIfShownChanged();
+  // A change to the theme or the UI font size shows at once, on this screen too: the fonts and metrics are applied
+  // and the screen laid out again with them. `themeBefore`, `fontSizeBefore`: the values before the change.
+  void applyUiLookIfChanged(uint8_t themeBefore, uint8_t fontSizeBefore);
 
   static constexpr size_t LIST_WINDOW_CAPACITY = 24;
   std::array<std::string, LIST_WINDOW_CAPACITY> windowLabels;
