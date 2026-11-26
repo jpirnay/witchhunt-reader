@@ -395,11 +395,20 @@ class CrossPointSettings {
   // docs/contributing/touch-architecture.md, "Gating").
   enum TOUCH_READER_CONTROLS {
     TOUCH_READER_OFF = 0,
-    TOUCH_READER_ON = 1,            // tap the outer thirds: left = back, right = forward
-    TOUCH_READER_SWIPE = 2,         // horizontal swipes turn pages; taps stay free
-    TOUCH_READER_INVERTED_TAP = 3,  // mirrored tap zones
+    TOUCH_READER_ON = 1,             // tap the outer thirds: left = back, right = forward
+    TOUCH_READER_SWIPE = 2,          // horizontal swipes turn pages; taps stay free
+    TOUCH_READER_INVERTED_TAP = 3,   // mirrored tap zones
+    TOUCH_READER_TAP_AND_SWIPE = 4,  // the tap zones and horizontal swipes both turn pages
     TOUCH_READER_CONTROLS_COUNT
   };
+  // Which contacts turn a page in `mode`: the reader (ReaderUtils::detectTouchPageTurn) and the gesture labels
+  // (TouchGestures::builtinLabelFor, the Gesture Actions overview) read the modes through these two, so they agree.
+  static constexpr bool touchReaderTapsTurnPages(const uint8_t mode) {
+    return mode == TOUCH_READER_ON || mode == TOUCH_READER_INVERTED_TAP || mode == TOUCH_READER_TAP_AND_SWIPE;
+  }
+  static constexpr bool touchReaderSwipesTurnPages(const uint8_t mode) {
+    return mode == TOUCH_READER_SWIPE || mode == TOUCH_READER_TAP_AND_SWIPE;
+  }
 
   // Text darkness for AA glyph rendering (forwarded to GfxRenderer::setTextDarkness)
   enum TEXT_DARKNESS {
