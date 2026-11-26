@@ -157,10 +157,9 @@ bottom edge returns Home.
 ## 4. Turning it off
 
 - **Settings → Controls → Touch Page Turn** chooses how touch turns pages: *Off*,
-  *Tap Zones*, *Swipe*, or *Tap Zones (Inverted)*. It governs page turns only — the
-  reader bars and the light
-  stay reachable, so switching page turns off while reading with a palm on the glass does
-  not strand you.
+  *Tap Zones*, *Swipe*, *Tap Zones (Inverted)*, or *Tap Zones + Swipe* (both). It governs
+  page turns only — the reader bars and the light stay reachable, so switching page turns
+  off while reading with a palm on the glass does not strand you.
 - **Settings → Controls → Touch Navigation** silences touch outside the reader.
 - **Settings → Controls → Touch Lock** silences touch everywhere, books included: page turns,
   the reader bars, gestures and the light panel. The keys keep working, the Home key too.

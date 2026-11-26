@@ -164,9 +164,9 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader, const b
     // hand is holding the device. Direction-agnostic removes the window entirely: begin
     // anywhere in the third and flick either way.
     //
-    // The cost is confined to Swipe reading mode, where the outer thirds lose the one-page
-    // swipe and keep the one-page TAP. In the shipped default (TOUCH_READER_ON, i.e. taps)
-    // horizontal swipes are unused, so there is no cost at all.
+    // The cost is confined to the swipe modes (Swipe, Tap Zones + Swipe), where the outer thirds
+    // lose the one-page swipe and keep the one-page TAP. In the shipped default (TOUCH_READER_ON,
+    // i.e. taps) horizontal swipes are unused, so there is no cost at all.
     case MappedInputManager::SwipeDir::Left:
       swipe = startZone == TapZones::Zone::Left    ? Gesture::SwipeInLeftZone
               : startZone == TapZones::Zone::Right ? Gesture::SwipeInRightZone

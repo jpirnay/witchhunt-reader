@@ -190,16 +190,21 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  if (SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE) {
-    // Horizontal swipes turn pages; taps stay free for the centred reader-menu
-    // zone. A slow swipe never becomes a long-press chapter skip.
+  const uint8_t mode = SETTINGS.touchReaderControls;
+  if (CrossPointSettings::touchReaderSwipesTurnPages(mode)) {
+    // Horizontal swipes turn pages. A slow swipe never becomes a long-press chapter skip. The swipe is read before
+    // the tap: the SDK can report both for one contact whose travel sits near the threshold, and that contact turns
+    // one page, not two.
     const auto dir = input.wasSwipe();
     if (dir == MappedInputManager::SwipeDir::Left || dir == MappedInputManager::SwipeDir::Right) {
       const TapZones::Turn turn = TapZones::turnForSwipe(dir == MappedInputManager::SwipeDir::Left, rightToLeft);
       result.prev = turn == TapZones::Turn::Back;
       result.next = turn == TapZones::Turn::Forward;
+      return result;
     }
-    return result;
+    // Swipe alone leaves the taps free for the centred reader-menu zone; Tap Zones + Swipe goes on to them (from
+    // PR #855, trungtypo).
+    if (!CrossPointSettings::touchReaderTapsTurnPages(mode)) return result;
   }
 
   int x = 0;
@@ -216,7 +221,7 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
   // (isTouchMenuTap below), so it must not double as a page turn. The vertical
   // bounds keep the menu zone from swallowing the whole centre column.
   if (y < 0 || y >= height) return result;
-  const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+  const bool inverted = mode == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
   const TapZones::Zone zone = TapZones::zoneFor(x, y, width, height);
   const TapZones::Turn turn = TapZones::turnFor(zone, inverted, rightToLeft);
   result.prev = turn == TapZones::Turn::Back;

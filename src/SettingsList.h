@@ -613,7 +613,7 @@ inline void buildSettings(const RowSink& emit) {
            .requiring(SettingRequires::TouchPanel));
   emit(SettingInfo::Enum(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
                          {StrId::STR_TOUCH_READER_OFF, StrId::STR_TOUCH_READER_TAP, StrId::STR_TOUCH_READER_SWIPE,
-                          StrId::STR_TOUCH_READER_INVERTED},
+                          StrId::STR_TOUCH_READER_INVERTED, StrId::STR_TOUCH_READER_TAP_AND_SWIPE},
                          "touchReaderCtl", StrId::STR_CAT_CONTROLS)
            .requiring(SettingRequires::TouchPanel));
   // Option order is CrossPointSettings::SLIDE_SWITCH_ACTION.

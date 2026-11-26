@@ -214,10 +214,9 @@ inline const char* nameOf(const Gesture gesture) {
 inline StrId builtinLabelFor(const Gesture gesture) {
   const uint8_t mode = SETTINGS.touchReaderControls;
   const bool readerTouchOn = mode != CrossPointSettings::TOUCH_READER_OFF;
-  const bool tapTurnsPages =
-      mode == CrossPointSettings::TOUCH_READER_ON || mode == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+  const bool tapTurnsPages = CrossPointSettings::touchReaderTapsTurnPages(mode);
   const bool invertedTaps = mode == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
-  const bool swipeTurnsPages = mode == CrossPointSettings::TOUCH_READER_SWIPE;
+  const bool swipeTurnsPages = CrossPointSettings::touchReaderSwipesTurnPages(mode);
 
   switch (gesture) {
     case Gesture::SwipeLeft:
