@@ -130,12 +130,13 @@ Exit end(const char* tag);
      Wi-Fi under a job's open socket crashes (`main.cpp:813`). Most of today's sites never reach that,
      because they reboot instead of deinitialising. This keeps today's reboot for that race and does not wait
      on the worker inside `onExit()`.
-1. Tears the radio down whatever `WiFi.getMode()` reports. A bare `esp_wifi_stop()` most likely does not read
-   back as `WIFI_MODE_NULL`: only `WiFi.mode(WIFI_OFF)` clears `_esp_wifi_started` (Arduino
-   `WiFiGeneric.cpp:364-377,715-725`). That makes the comment at `KOReaderSyncActivity.h:159-162` wrong; fix it
-   in PR 1. For AP or APSTA, call `WiFi.softAPdisconnect(true)` first. Then call
-   `HalClock::wifiOff(/*skipNtpSync=*/true)`; `WIFI_OFF` runs `esp_wifi_deinit` and destroys the netifs
-   (`WiFiGeneric.cpp:319-377`). The builder verifies that calling it with the radio already off is harmless.
+1. Tears the radio down unless `WiFi.getMode()` reads `WIFI_MODE_NULL`. That reading can be trusted for "off":
+   `getMode()` returns NULL only once `WiFi.mode(WIFI_OFF)` has cleared `_esp_wifi_started`, or when Wi-Fi never
+   started (Arduino `WiFiGeneric.cpp:364-377,715-725`). A bare `esp_wifi_stop()` still reads STA, so it is torn
+   down too. That makes the comment at `KOReaderSyncActivity.h:159-162` wrong; fix it in PR 1. Skipping an
+   already-off radio saves `wifiOff()`'s 200 ms of delays. For AP or APSTA, call `WiFi.softAPdisconnect(true)`
+   first. Then call `HalClock::wifiOff(/*skipNtpSync=*/true)`; `WIFI_OFF` runs `esp_wifi_deinit` and destroys
+   the netifs (`WiFiGeneric.cpp:319-377`).
 2. Clears `g_unverifiableHosts` through a new `HttpDownloader` function, so the next session verifies again.
 3. Reads `heap_caps_get_free_size()` and `heap_caps_get_largest_free_block()` for
    `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT`.
@@ -268,8 +269,7 @@ on for about 180 sessions before the free figure reaches the minimum and it rebo
 
 ## Left to the builder
 
-- Whether `HalClock::wifiOff()` with the radio already off is harmless, and whether Arduino's `WIFI_OFF`
-  deinitialises the driver on this core (the measurement will show either way).
+- Whether the measured figures confirm that Arduino's `WIFI_OFF` releases what `esp_wifi_deinit` frees.
 - The exact navigation call at each site, verified against how that site was opened (push or replace).
 - `onExit()` runs under the exclusive `RenderLock` (`ActivityManager.cpp:419-430`); `wifiOff()` sleeps 200 ms
   there. Acceptable unless the device run shows a visible stall.
