@@ -86,6 +86,16 @@ void CrossPointSettings::applyDeviceDisplayDefaults() {
   halfRefreshAfterImagePage = HalCapabilities::halfRefreshFlashesBlack() ? 0 : 1;
 }
 
+#if CP_TOUCH_UI
+// Defaults for a board with a digitiser, applied as the button and display ones are. Compiled out with the touch layer,
+// which leaves the C3 builds as they were.
+void CrossPointSettings::applyDeviceTouchDefaults() {
+  // A finger points at the row it means, so one tap opens it; the keys keep their cursor. Select, then activate stays
+  // a choice (Tap Action). From PR #855 (trungtypo), where it was one board's default.
+  if (HalCapabilities::hasTouch()) touchListActivation = TOUCH_LIST_ACTIVATE_IMMEDIATELY;
+}
+#endif
+
 namespace {
 constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
 
@@ -290,6 +300,9 @@ bool CrossPointSettings::loadFromFile() {
   // selection and before JSON is read, so missing/legacy values inherit them.
   applyDeviceButtonDefaults();
   applyDeviceDisplayDefaults();
+#if CP_TOUCH_UI
+  applyDeviceTouchDefaults();
+#endif
 
   // Try JSON first
   if (Storage.exists(SETTINGS_FILE_JSON)) {
