@@ -9075,6 +9075,8 @@ void EpubReaderActivity::openReaderBars() {
   info.hasSync = KOREADER_STORE.hasCredentials();
   info.hasAutoRotate = HalCapabilities::hasTiltSensor();
   info.autoRotate = SETTINGS.autoRotate != 0;
+  // The light drawer is part of the touch layer; every board with a reading light has it.
+  info.hasLight = CP_TOUCH_UI && HalCapabilities::hasFrontlight();
   info.orientation = SETTINGS.orientation;
   // The time spent in the book: what the history holds, and the session under way, which lands there only when the
   // reader closes.
@@ -9358,6 +9360,17 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
       return;
     case ReaderBarsResult::Action::SyncPush:
       onReaderMenuConfirm(MenuAction::PUSH_LOCAL);
+      return;
+    case ReaderBarsResult::Action::Light:
+#if CP_TOUCH_UI
+      // The page first: the drawer composites over the frame on the panel
+      // (ActivityManager::dispatchLightPanelGesture()), which still holds the bars, and prepareFramebufferForCapture()
+      // only brings back a pre-rendered page. Without this the tab bar stayed under the drawer (T5S3).
+      requestUpdateAndWait();
+      activityManager.requestLightPanel();
+#else
+      requestUpdate();
+#endif
       return;
   }
 }

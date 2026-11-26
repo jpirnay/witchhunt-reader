@@ -68,8 +68,8 @@ void ReaderBarsController::begin(const bool touch, const bool fontWaits) {
 }
 
 void ReaderBarsController::appendDebugState(std::string& out) const {
-  static constexpr const char* kFocus[] = {"none", "exit",   "star",  "tabs", "prev", "goto",
-                                           "next", "layout", "title", "pull", "push", "list"};
+  static constexpr const char* kFocus[] = {"none",   "exit",  "star", "tabs", "prev", "goto", "next",
+                                           "layout", "title", "pull", "push", "list", "light"};
   static constexpr const char* kTab[] = {"navigation", "progress", "layout", "orientation", "more"};
   static constexpr const char* kPanel[] = {"none", "progress", "layout", "navigation", "orientation"};
   SerialCommandGrammar::appendField(out, "focus", kFocus[static_cast<uint8_t>(focus)]);
@@ -100,6 +100,7 @@ ReaderBarsLayout::Model ReaderBarsController::model() const {
   ReaderBarsLayout::Model model;
   model.title = info.title.c_str();
   model.starred = starred;
+  model.showLight = info.hasLight;
   model.panel = panel;
   model.focus = focus;
   model.focusedTab = focusedTab;
@@ -364,6 +365,9 @@ void ReaderBarsController::pressButton(const Button button) {
     case Button::Star:
       toggleStar();
       return;
+    case Button::Light:
+      close(ReaderBarsResult::Action::Light);
+      return;
     case Button::PrevChapter:
       close(ReaderBarsResult::Action::PrevChapter);
       return;
@@ -464,6 +468,9 @@ void ReaderBarsController::activateFocus() {
     case Focus::Star:
       pressButton(Button::Star);
       return;
+    case Focus::Light:
+      pressButton(Button::Light);
+      return;
     case Focus::Tabs:
       openTab(focusedTab);
       return;
@@ -507,15 +514,18 @@ void ReaderBarsController::moveAlongRow(const int step) {
     case Focus::None:
       focus = Focus::Tabs;
       return;
-    // The top row runs back, title, star.
+    // The top row runs back, title, light (where there is one), star.
     case Focus::Exit:
       if (step > 0) focus = Focus::Title;
       return;
     case Focus::Title:
-      if (step != 0) focus = step < 0 ? Focus::Exit : Focus::Star;
+      if (step != 0) focus = step < 0 ? Focus::Exit : (info.hasLight ? Focus::Light : Focus::Star);
+      return;
+    case Focus::Light:
+      if (step != 0) focus = step < 0 ? Focus::Title : Focus::Star;
       return;
     case Focus::Star:
-      if (step < 0) focus = Focus::Title;
+      if (step < 0) focus = info.hasLight ? Focus::Light : Focus::Title;
       return;
     case Focus::Tabs: {
       const int next = static_cast<int>(focusedTab) + step;
@@ -595,6 +605,7 @@ void ReaderBarsController::moveBetweenRows(const int step) {
       return;
     case Focus::Exit:
     case Focus::Title:
+    case Focus::Light:
     case Focus::Star:
       if (step < 0) return;
       if (panel == Panel::Progress) {
