@@ -210,6 +210,13 @@ class Activity {
   // global Back bound there threw away the text in hand.
   virtual bool keepsConfirmGestures() const { return false; }
   virtual bool takesButtonAction(CrossPointSettings::BUTTON_ACTION, MappedInputManager::Button) const { return false; }
+#if CP_TOUCH_UI
+  // Every contact on this screen is its own: while it is on top the bound gestures (main.cpp, GestureEventManager) do
+  // not run. For a screen whose controls follow a finger, where a drag along a slider would otherwise also be the swipe
+  // a gesture is bound to, and a hold on a control in a corner the corner's action. Compiled out with the touch layer,
+  // as overlaysScreenBelow() is.
+  virtual bool keepsTouchContacts() const { return false; }
+#endif
 
   // A manual force refresh (a button or gesture bound to Force Refresh) while this activity is on
   // top. Return true when the activity repaints itself in `mode`; false lets main.cpp re-flush the
