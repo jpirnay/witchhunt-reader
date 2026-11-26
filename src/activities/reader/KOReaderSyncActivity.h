@@ -157,13 +157,14 @@ class KOReaderSyncActivity final : public Activity {
   bool closeRequested = false;
 
   // Tracks whether this session activated WiFi. Set in onEnter past the credentials
-  // check; checked in onExit to decide whether to silent-reboot. Can't rely on
-  // WiFi.getMode() because intermediate paths call esp_wifi_stop() to drop the
-  // radio while user reads the result, which makes WiFi.getMode() return WIFI_MODE_NULL.
+  // check; checked in onExit to decide whether to end the session (wifi_session::end(),
+  // a reboot on the C3s). Can't rely on WiFi.getMode(): dropRadioForRemoteMapping() turns
+  // the radio fully off mid-session (HalClock::wifiOff()), after which it reads
+  // WIFI_MODE_NULL. A bare esp_wifi_stop() leaves it reading STA (Arduino's getMode()).
   bool wifiActivated = false;
 
   // Captured from APP_STATE.koReaderSyncSession's postAction/postActionTarget in resumeReader()
-  // so onExit() can route the silent reboot even after resumeReader() has cleared the persisted
+  // so onExit() can route the C3s' silent reboot even after resumeReader() has cleared the persisted
   // session (Reader/Home/OpenBook all resolve their destination before the reboot happens, so
   // nothing needs to survive it — only OpdsSearch leaves the persisted fields in place, since that
   // one is resolved by HomeActivity after the reboot instead).

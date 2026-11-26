@@ -29,6 +29,7 @@
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "network/WifiSessionEnd.h"
 #include "util/PrintfDouble.h"
 
 namespace {
@@ -47,7 +48,11 @@ struct LastPushBytes {
 void logSyncMemSnapshot(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  LOG_DBG("KOSync", "Sync mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
+  // The internal pool apart: on a PSRAM board it is the scarce one, and the two above count the PSRAM too.
+  const uint32_t internalFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  const uint32_t internalContig = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  LOG_DBG("KOSync", "Sync mem[%s]: free=%lu contig=%lu internal=%lu/%lu", stage, freeHeap, contigHeap, internalFree,
+          internalContig);
 }
 
 // Freshness policy, on top of HalClock::ensureUsableForTls()'s correctness floor. The floor
@@ -325,7 +330,7 @@ bool KOReaderSyncActivity::handleAutoPushPreflight() {
             logPpb(warmupProgress.percentage), warmupProgress.progress.c_str(), logPpb(localProgress.percentage),
             currentSpineIndex, currentPage);
     KOReaderSyncClient::endPersistentSession();
-    // Drop the radio while user reads the result; full teardown happens at silent reboot.
+    // Drop the radio while user reads the result; full teardown happens at the session end (wifi_session::end()).
     esp_wifi_stop();
     APP_STATE.koReaderSyncSession.outcome = KOReaderSyncOutcomeState::UPLOAD_COMPLETE;
     APP_STATE.saveToFile();
@@ -621,7 +626,7 @@ void KOReaderSyncActivity::performUpload() {
   logSyncMemSnapshot("after_updateProgress");
 
   if (result != KOReaderSyncClient::OK) {
-    // Drop the radio while user reads the result; full teardown happens at silent reboot.
+    // Drop the radio while user reads the result; full teardown happens at the session end (wifi_session::end()).
     esp_wifi_stop();
     {
       RenderLock lock(*this);
@@ -641,7 +646,7 @@ void KOReaderSyncActivity::performUpload() {
 
   saveOwnLastPush();
 
-  // Drop the radio while user reads the success screen; full teardown happens at silent reboot.
+  // Drop the radio while user reads the success screen; full teardown happens at the session end (wifi_session::end()).
   esp_wifi_stop();
   APP_STATE.koReaderSyncSession.outcome = KOReaderSyncOutcomeState::UPLOAD_COMPLETE;
   APP_STATE.saveToFile();
@@ -757,9 +762,11 @@ void KOReaderSyncActivity::onExit() {
   logSyncMemSnapshot("onExit_after_cleanup");
 
   if (wifiActivated) {
-    WiFi.disconnect(false);
-    delay(30);
-    // The reboot stays, and it is now a measured decision rather than an inherited one.
+    // Where the heap allows (the PSRAM boards, HalCapabilities::restartsAfterWifiSession()), the radio goes off and
+    // the screen resumeReader() asked for opens in this boot: its navigation is queued already. Based on PR #855
+    // (trungtypo), where it was one board's.
+    if (wifi_session::end("KOSync") == wifi_session::Exit::CarryOn) return;
+    // On the C3s the reboot stays, and it is a measured decision rather than an inherited one.
     //
     // The old rationale -- "a WiFi session fragments the heap past rebuilding the reader in
     // place" -- turned out to be wrong on wolfSSL: contig runs 61428 -> 61428 -> 61428 across a
@@ -1114,7 +1121,7 @@ void KOReaderSyncActivity::dropRadioForRemoteMapping() {
   }
   // The same full teardown the settings' network screens use: SNTP off, disconnect, WIFI_OFF
   // (esp_wifi_stop + deinit + netif). No NTP here: the clock was settled before the GET.
-  // wifiActivated stays set, so onExit still reboots as after any network session.
+  // wifiActivated stays set, so onExit still ends the session as after any other.
   KOReaderSyncClient::endPersistentSession();
   HalClock::wifiOff(/*skipNtpSync=*/true);
   radioDroppedForMapping = true;

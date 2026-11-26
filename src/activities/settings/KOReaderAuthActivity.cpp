@@ -16,6 +16,7 @@
 #include "activities/reader/KOReaderSyncWorker.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/WifiSessionEnd.h"
 
 void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
@@ -146,11 +147,11 @@ void KOReaderAuthActivity::onEnter() {
 void KOReaderAuthActivity::onExit() {
   Activity::onExit();
 
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(false);
-    delay(30);
-  }
-  // Unconditional: onEnter() released the secondary framebuffer for the network
+  // Where the heap allows (the PSRAM boards), the radio goes off and KOReader settings, which pushed this screen there
+  // (KOReaderSettingsActivity::openAccountCheck()), is back under it. From PR #855 (trungtypo), where it was one
+  // board's.
+  if (wifi_session::end("KOAuth") == wifi_session::Exit::CarryOn) return;
+  // The C3s, on every exit: onEnter() released the secondary framebuffer for the network
   // session and nothing reallocates it, so every exit path — including a
   // cancelled WiFi selection that never brought the radio up — must reboot to
   // restore double-buffered rendering. Land back in KOReader settings, where the
