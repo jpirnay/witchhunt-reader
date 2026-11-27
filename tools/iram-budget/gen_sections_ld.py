@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Regenerate the ESP32-C3 sections.ld of pioarduino's prebuilt Arduino libraries with some linker-only Kconfig options
+"""Regenerate the ESP32-C3 sections.ld of the Arduino core's libraries with some linker-only Kconfig options
 changed (code moved out of IRAM, which on the C3 is carved from the heap's SRAM). It runs ESP-IDF's
 own ldgen (fragment grammar, generation model, template filling) at the IDF commit the libraries were built from,
-against the prebuilt libraries themselves: nothing is recompiled, so only options that change linker fragments alone
+against the libraries themselves: nothing is recompiled, so only options that change linker fragments alone
 may be flipped (options.txt says which, and why each is linker-only).
 
     tools/iram-budget/fetch_idf.sh <idf dir>          # the pinned IDF's fragments, templates and ldgen
     python3 -m venv <venv> && <venv>/bin/pip install pyparsing==3.3.3
     <venv>/bin/python tools/iram-budget/gen_sections_ld.py --idf <idf dir> --check
     <venv>/bin/python tools/iram-budget/gen_sections_ld.py --idf <idf dir>     # writes ld/esp32c3-iram-budget/
+
+The C3 envs rebuild the core from [firmware_tuned]'s custom_sdkconfig. After a change there, build a C3 env once: it
+rebuilds the core into framework-arduinoespressif32-libs/esp32c3 and stops at scripts/iram_budget.py, whose check
+then fails. Run the two commands above (--libs if PLATFORMIO_CORE_DIR is not ~/.platformio) and build again.
 
 --check regenerates with no option changed and requires the platform's own sections.ld, byte for byte: the proof that
 the inputs (IDF commit, fragment selection, libraries, template preprocessing) are the ones the libraries were built
@@ -164,11 +168,11 @@ def main():
     overrides = {} if args.check else read_sdkconfig(args.options)
     for k, v in overrides.items():
         if k not in values:
-            sys.exit("option CONFIG_%s is not in the prebuilt sdkconfig" % k)
+            sys.exit("option CONFIG_%s is not in the core's sdkconfig" % k)
         values[k] = v
     sdkconfig = SDKConfig(values)
 
-    # The template, preprocessed as IDF's ld.cmake does, with the prebuilt sdkconfig.h (the options flipped here are
+    # The template, preprocessed as IDF's ld.cmake does, with the core's sdkconfig.h (the options flipped here are
     # linker-only, so the template does not read them).
     ld_dir = os.path.join(args.idf, "components", "esp_system", "ld")
     with tempfile.TemporaryDirectory() as tmp:

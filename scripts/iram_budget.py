@@ -1,16 +1,18 @@
 """
 PlatformIO post-configuration hook: link the ESP32-C3 envs with
-ld/esp32c3-iram-budget/sections.ld instead of the prebuilt Arduino libraries' own sections.ld.
+ld/esp32c3-iram-budget/sections.ld instead of the Arduino core's own sections.ld. The C3 envs rebuild that core from
+[firmware_tuned]'s custom_sdkconfig (platformio.ini), so "the core" here is the rebuilt one.
 
 That script is generated, never edited: tools/iram-budget/gen_sections_ld.py runs ESP-IDF's ldgen at the commit the
-prebuilt libraries were built from, against those libraries, with the linker-only Kconfig options of
+core's libraries were built from, against those libraries, with the linker-only Kconfig options of
 tools/iram-budget/options.txt flipped (FreeRTOS and ring buffer functions that need not run with the flash cache
 disabled, and the unused RMT interrupt handlers, placed in flash instead of IRAM). On the C3 IRAM is carved from the
 same SRAM as the heap, so every byte that leaves .iram0.text is a byte of heap at boot.
 
 The generated script is only valid for the libraries it was generated against. Its header records the sha256 of the
-platform's sections.ld it was derived from; when the platform's file differs (pioarduino updated its prebuilt
-libraries), the build stops here: regenerate (see gen_sections_ld.py) rather than link a stale script. It was
+platform's sections.ld it was derived from; when the platform's file differs (pioarduino updated its libraries, or
+custom_sdkconfig changed and the core was rebuilt), the build stops here: regenerate (see gen_sections_ld.py) rather
+than link a stale script. It was
 generated for the DIO flash mode's libspi_flash.a; any other flash mode stops the build too.
 
 ESP32-S3 and ESP32 envs (X4 Pro, LilyGo T5S3, Murphy) are left alone.
@@ -46,7 +48,8 @@ if board.get("build.mcu", "") == "esp32c3":
     if actual != m.group(1):
         print("iram_budget: ERROR: the platform's %s (sha256 %s) is not the one %s was generated from (%s)."
               % (original, actual, ours, m.group(1)))
-        print("iram_budget: pioarduino's prebuilt libraries changed; regenerate with tools/iram-budget/gen_sections_ld.py.")
+        print("iram_budget: the core's libraries changed (a pioarduino update, or a custom_sdkconfig change rebuilt them);"
+              " regenerate with tools/iram-budget/gen_sections_ld.py.")
         env.Exit(1)  # noqa: F821
 
     flash_mode = env.GetProjectOption("board_build.flash_mode", board.get("build.flash_mode", "dio"))  # noqa: F821

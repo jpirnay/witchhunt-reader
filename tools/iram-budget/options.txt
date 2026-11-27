@@ -1,5 +1,5 @@
-# Kconfig options gen_sections_ld.py flips against the prebuilt sdkconfig. Each changes the ESP-IDF linker fragments
-# only (grep of IDF v5.5.5: the symbol appears in .lf files and test apps, in no compiled source), so the prebuilt
+# Kconfig options gen_sections_ld.py flips against the core's sdkconfig. Each changes the ESP-IDF linker fragments
+# only (grep of IDF v5.5.5: the symbol appears in .lf files and test apps, in no compiled source), so the core's
 # libraries stay valid.
 #
 # FreeRTOS: the kernel functions IDF's freertos/linker.lf allows in flash; the ISR-callable ones (FromISR, the tick,
