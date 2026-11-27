@@ -215,12 +215,14 @@ class GfxRenderer {
   // asked of it is "at least N?", and N is single digits. Starts saturated so a repaint issued
   // before any refresh has happened still gets its ghost-clearing HALF.
   mutable uint8_t fastRefreshesSinceFull_ = 0xFF;
+  // Off while a render pass draws only the minute tick (countFastRefreshes()).
+  mutable bool fastRefreshesCounted_ = true;
   // Counts one shipped frame. Called from every path that reaches the panel, with the EFFECTIVE
   // mode (i.e. after consumeRefreshOverride), because an armed override is what actually drives
   // the waveform and therefore what actually clears the ghosting.
   void noteRefresh(HalDisplay::RefreshMode effectiveMode) const {
     if (effectiveMode == HalDisplay::FAST_REFRESH) {
-      if (fastRefreshesSinceFull_ < 0xFF) fastRefreshesSinceFull_++;
+      if (fastRefreshesCounted_ && fastRefreshesSinceFull_ < 0xFF) fastRefreshesSinceFull_++;
     } else {
       fastRefreshesSinceFull_ = 0;
     }
@@ -506,6 +508,10 @@ class GfxRenderer {
   bool ghostClearingHalfWorthwhile(const uint8_t fastRefreshBudget = GHOST_CLEARING_FAST_BUDGET) const {
     return fastRefreshesSinceFull_ >= fastRefreshBudget;
   }
+  // Whether the FAST refreshes shipped from now on count toward ghostClearingHalfWorthwhile(). Off only
+  // for a render pass that draws the minute tick and nothing else (MinuteTick::ClockOnlyFrame), on the
+  // render task, and back on once that pass is done. A HALF or FULL resets the count either way.
+  void countFastRefreshes(const bool counted) const { fastRefreshesCounted_ = counted; }
   // Make the write framebuffer match the currently displayed frame. Call before
   // a partial repaint that patches a few regions and re-displays without
   // re-rendering the full frame: displayBuffer() ends with swapBuffers(), so

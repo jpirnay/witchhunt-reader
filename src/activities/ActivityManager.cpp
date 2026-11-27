@@ -169,7 +169,9 @@ void ActivityManager::renderTaskLoop() {
       // itself.
       // A Dark Mode change since the last frame (Settings, the web settings, the light drawer) lands on this one.
       applyOutputPolarity();
-      armGhostClearingRefresh();
+      const bool clockOnly = clockOnlyFrame.takeForPass();
+      armGhostClearingRefresh(clockOnly);
+      renderer.countFastRefreshes(!clockOnly);
       {
         // A screen that draws book text draws its first-sight glyphs in the secondary framebuffer, not on the heap:
         // black-and-white screens all. The reader keeps it for its grayscale passes and pre-renders.
@@ -177,6 +179,7 @@ void ActivityManager::renderTaskLoop() {
         const glyph_miss::LendScope glyphLend(lend ? &lendFramebufferForGlyphs : nullptr);
         currentActivity->render(std::move(lock));
       }
+      renderer.countFastRefreshes(true);
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.
       renderPassActive.store(false, std::memory_order_release);
@@ -237,16 +240,18 @@ void ActivityManager::renderTaskLoop() {
 //  - A non-reader screen gets a HALF every refreshFrequencyPages frames, counted like the reader
 //    counts pages (N-1 FAST, then the HALF), so a list ghosts no more than a book does. The
 //    reader runs that same cadence itself (ReaderUtils), and counting it here too would double it.
+//    A frame that draws only the minute tick neither counts nor brings the HALF, as the reader's
+//    clock tick does not spend its page budget (MinuteTick::ClockOnlyFrame).
 // The override stays armed through a pass that ships nothing, so it lands on the next real frame.
 // It also replaces a FULL a screen asked for, which costs nothing on the panels this is for: their
 // drivers have a single waveform for every mode but FAST (on the T5S3, LgfxEpdDriver's epdModeFor()).
-void ActivityManager::armGhostClearingRefresh() {
+void ActivityManager::armGhostClearingRefresh(const bool clockOnly) {
   if (!HalCapabilities::clearsGhostsOnEveryScreen()) return;
   const uint32_t changes = activityChanges.load(std::memory_order_relaxed);
   const bool activityChanged = activityChangesRendered.exchange(changes, std::memory_order_relaxed) != changes;
 
   const int frequency = SETTINGS.getRefreshFrequency();
-  const bool cadenceDue = frequency > 0 && !currentActivity->isReaderActivity() &&
+  const bool cadenceDue = frequency > 0 && !clockOnly && !currentActivity->isReaderActivity() &&
                           renderer.ghostClearingHalfWorthwhile(static_cast<uint8_t>(frequency - 1));
   if (activityChanged || cadenceDue) renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
 }
@@ -330,7 +335,9 @@ void ActivityManager::loop() {
         const bool screenShowsTime = currentActivity && currentActivity->onClockMinute();
         if (MinuteTick::redraws(SETTINGS.useClock, screenShowsTime,
                                 [this] { return currentActivity && currentActivity->shouldSkipPeriodicUpdate(); })) {
+          const bool othersAsked = requestedUpdate;
           requestUpdate();
+          clockOnlyFrame.tick(othersAsked);
         }
       }
     }
@@ -1291,6 +1298,8 @@ void ActivityManager::showBusyIndicator() {
 }
 
 void ActivityManager::requestUpdate(bool immediate) {
+  // The minute tick marks its own frame after this (loop()); every other request is a real frame.
+  clockOnlyFrame.other();
   if (immediate) {
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
@@ -1329,6 +1338,7 @@ void ActivityManager::requestUpdateAndWait() {
   // Cannot call while holding RenderLock or it will cause a deadlock
   assert(!holdingRenderLock && "Cannot call requestUpdateAndWait() while holding RenderLock");
 
+  clockOnlyFrame.other();
   xTaskNotify(renderTaskHandle, 1, eIncrement);
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 }
