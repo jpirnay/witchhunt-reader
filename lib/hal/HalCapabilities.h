@@ -412,6 +412,18 @@ bool sendsSleepEventsFromCleanBoot();
 inline bool sendsSleepEventsFromCleanBoot() { return !keepsSecondaryBuffer(); }
 #endif
 
+// A Wi-Fi screen's exit restarts the device (wifi_session::end(), src/network/WifiSessionEnd.h). The C3s: the session
+// gave up the secondary framebuffer, which nothing reallocates, and a full Wi-Fi stop and deinit still left about
+// 20 KB below the heap before it (-20,560 / -20,588 / -20,644 B, three KOReader syncs on the X3). The PSRAM boards give
+// up no framebuffer: they turn the radio off and go on in the same boot while the internal heap still covers the next
+// session (the T5S3 kept 120,020 B free, a 49,140 B block, after its first session). cppcheck sees only the
+// declaration, as above.
+#if defined(CPPCHECK_ANALYSIS)
+bool restartsAfterWifiSession();
+#else
+inline bool restartsAfterWifiSession() { return !keepsSecondaryBuffer(); }
+#endif
+
 // A new UI theme or UI font size waits for Settings to close (SettingsActivity::onExit), rather than laying the open
 // screen out again at once (SettingsActivity::applyUiLookIfChanged). The C3s, for now: the live change replaces the
 // theme object and binds the UI fonts again with the screens below Settings still resident, which nobody has measured

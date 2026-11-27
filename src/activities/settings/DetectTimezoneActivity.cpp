@@ -18,6 +18,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/WifiSessionEnd.h"
 #include "util/TimezoneDetectMap.h"
 #include "util/Timezones.h"
 
@@ -151,7 +152,8 @@ void DetectTimezoneActivity::onEnter() {
 void DetectTimezoneActivity::onExit() {
   Activity::onExit();
   HalClock::wifiOff();
-  if (wifiWasUsed_) {
+  // The C3s reboot; the PSRAM boards return to Clock settings in this boot while the heap allows.
+  if (wifiWasUsed_ && wifi_session::end("TZ") == wifi_session::Exit::Reboot) {
     silentRestartToClockSettings();
   }
 }
@@ -173,8 +175,9 @@ void DetectTimezoneActivity::onWifiSelectionComplete(bool success) {
 }
 
 // The join screen brought the radio up (station mode, a scan) before it was backed out of. That
-// is a WiFi session like any other, so onExit() restarts into Clock settings, where Back leads,
-// instead of turning the radio off and carrying on.
+// is a WiFi session like any other, so onExit() ends it: on the C3s by restarting into Clock
+// settings, where Back leads; on the PSRAM boards by turning the radio off and carrying on while
+// the heap allows (wifi_session::end()).
 void DetectTimezoneActivity::onWifiSelectionCancelled() {
   wifiWasUsed_ = true;
   finish();

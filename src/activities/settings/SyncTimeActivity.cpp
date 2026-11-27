@@ -15,6 +15,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/WifiSessionEnd.h"
 #include "util/DecimalFormat.h"
 
 static void formatDuration(char* buf, size_t bufSize, int32_t totalSeconds) {
@@ -73,8 +74,9 @@ void SyncTimeActivity::onExit() {
   Activity::onExit();
   HalClock::wifiOff(true);
   // Turning the radio off does not give the heap back: a torn-down session still
-  // ends well below the pre-WiFi baseline. Reboot, as DetectTimezoneActivity does.
-  if (wifiWasUsed_) {
+  // ends well below the pre-WiFi baseline. The C3s reboot, as DetectTimezoneActivity
+  // does; the PSRAM boards return to Clock settings in this boot while the heap allows.
+  if (wifiWasUsed_ && wifi_session::end("NTP") == wifi_session::Exit::Reboot) {
     silentRestartToClockSettings();
   }
 }
@@ -96,8 +98,9 @@ void SyncTimeActivity::onWifiSelectionComplete(bool success) {
 }
 
 // The join screen brought the radio up (station mode, a scan) before it was backed out of. That
-// is a WiFi session like any other, so onExit() restarts into Clock settings, where Back leads,
-// instead of turning the radio off and carrying on.
+// is a WiFi session like any other, so onExit() ends it: on the C3s by restarting into Clock
+// settings, where Back leads; on the PSRAM boards by turning the radio off and carrying on while
+// the heap allows (wifi_session::end()).
 void SyncTimeActivity::onWifiSelectionCancelled() {
   wifiWasUsed_ = true;
   finish();

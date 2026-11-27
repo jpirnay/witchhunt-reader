@@ -27,10 +27,12 @@ class GfxRenderer;
 // against a valid baseline rather than stale controller content (X4; no-op on
 // X3).
 //
-// There is no reallocSecondaryBuffer() pairing. Every current caller
-// silentRestart()s on exit, and the reboot rebuilds clean state. If you add a
-// caller that keeps running afterwards, follow the full Scenario 1 procedure in
-// the doc instead of using this helper.
+// There is no reallocSecondaryBuffer() pairing. Every caller reboots on exit on
+// the boards where this released the buffer: directly, or through
+// wifi_session::end() (network/WifiSessionEnd.h), which does so wherever
+// HalCapabilities::restartsAfterWifiSession() says (the PSRAM boards refuse the
+// release). If you add a caller that keeps running afterwards on a C3, follow the
+// full Scenario 1 procedure in the doc instead of using this helper.
 //
 // Idempotent: safe to call again before TLS to drop font cache that status
 // screens repopulated since the first call.

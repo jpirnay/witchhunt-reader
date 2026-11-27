@@ -37,6 +37,7 @@ make parallel PRs conflict: two PRs that each delete a neighbouring bullet edit 
 | [test-suite.md](test-suite.md) | Host test suite: firmware paths with no host test, tests blind to corruption, goldens to extend, renames and moves, small cleanups from the second audit, the epub_optimizer sweep |
 | [txt-pipeline.md](txt-pipeline.md) | TXT on the EPUB pipeline and the browser converter to UTF-8: decided, not started, parked; design, traps, order of work |
 | [ui-languages-and-keyboards.md](ui-languages-and-keyboards.md) | Estonian as an interface language and a Vietnamese keyboard (both decide), a CJK keyboard |
+| [wifi-session-end.md](wifi-session-end.md) | Leaving a Wi-Fi screen without a restart on the PSRAM boards, after PR 1 (#941): the handover (state, order of work, the device checks, traps), PR 2 (downloads) and PR 3 (the web server), the leftovers PR 1 found, device runs not yet done. One file per item in [wifi-session-end/](wifi-session-end/) |
 
 Design records for shipped features, cited from code, are in [../design/](../design/); reference
 documentation is in [../contributing/](../contributing/) and the other files under `docs/`.

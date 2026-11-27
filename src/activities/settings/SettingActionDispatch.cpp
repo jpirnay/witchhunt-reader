@@ -33,6 +33,7 @@
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/weather/WeatherSettingsActivity.h"
+#include "network/WifiSessionEnd.h"
 
 std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRenderer& renderer,
                                                   MappedInputManager& mappedInput) {
@@ -125,10 +126,8 @@ std::unique_ptr<Activity> createSelectorActivity(const SettingInfo& setting, Gfx
   return std::make_unique<EnumSelectionActivity>(renderer, mappedInput, setting);
 }
 
-void restartToSettingsIfRadioLeftOn() {
+void endRadioLeftOnBySettingAction() {
   if (WiFi.getMode() == WIFI_MODE_NULL) return;
-  LOG_DBG("SET", "Settings action left the radio up; rebooting to clear the WiFi heap");
-  WiFi.disconnect(false);
-  delay(30);
-  silentRestartToSettings();
+  LOG_DBG("SET", "Settings action left the radio up; ending the session");
+  if (wifi_session::end("SET") == wifi_session::Exit::Reboot) silentRestartToSettings();
 }

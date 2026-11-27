@@ -491,9 +491,9 @@ void HomeActivity::restoreSecondaryBuffer(bool callerHoldsRenderLock) {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
-  // A finished-book "sync to KOReader, then search OPDS for this author" request that just
-  // rebooted (the sync reboots to reclaim WiFi-session heap fragmentation, see
-  // KOReaderSyncActivity::onExit()) lands here first — there's no reader to hand it to the way
+  // A finished-book "sync to KOReader, then search OPDS for this author" request lands here
+  // first, after the sync's restart on the C3s or its goHome() in the same boot on the PSRAM boards
+  // (KOReaderSyncActivity::onExit(), wifi_session::end()) — there's no reader to hand it to the way
   // the OpenBook/Reader post-actions can via APP_STATE.openEpubPath, so Home is what consumes it.
   // replaceActivity() defers this to the next loop() tick rather than re-entering while this
   // activity is still being constructed (see the "delete this" guard in ActivityManager).

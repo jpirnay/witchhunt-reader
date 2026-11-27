@@ -314,7 +314,7 @@ void SettingsActivity::activateIndex(const int index) {
     auto resultHandler = [this](const ActivityResult& result, const bool usedWifi) {
       CrossPointSettings::normalizeDependentSettings(SETTINGS);
       SETTINGS.saveToFile();
-      if (usedWifi) restartToSettingsIfRadioLeftOn();
+      if (usedWifi) endRadioLeftOnBySettingAction();
       needsHalfRefresh = true;
       const auto* menuResult = std::get_if<MenuResult>(&result.data);
       if (menuResult && menuResult->action != -1) {
@@ -324,7 +324,7 @@ void SettingsActivity::activateIndex(const int index) {
           startActivityForResult(std::move(activity), [this, nextUsedWifi](const ActivityResult&) {
             CrossPointSettings::normalizeDependentSettings(SETTINGS);
             SETTINGS.saveToFile();
-            if (nextUsedWifi) restartToSettingsIfRadioLeftOn();
+            if (nextUsedWifi) endRadioLeftOnBySettingAction();
             needsHalfRefresh = true;
           });
         }

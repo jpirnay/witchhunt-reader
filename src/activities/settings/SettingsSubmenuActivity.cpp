@@ -33,7 +33,7 @@ void SettingsSubmenuActivity::onActionSelected(int index) {
       startActivityForResult(std::move(activity), [this, usedWifi](const ActivityResult&) {
         CrossPointSettings::normalizeDependentSettings(SETTINGS);
         SETTINGS.saveToFile();
-        if (usedWifi) restartToSettingsIfRadioLeftOn();
+        if (usedWifi) endRadioLeftOnBySettingAction();
         needsHalfRefresh = true;
         requestUpdate();
       });

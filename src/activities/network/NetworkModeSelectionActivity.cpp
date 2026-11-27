@@ -12,6 +12,7 @@
 #include "OpdsServerStore.h"
 #include "SilentRestart.h"
 #include "components/icons/networkModeIcons.h"
+#include "network/WifiSessionEnd.h"
 
 namespace fui = freeink::ui;
 
@@ -57,32 +58,30 @@ bool isListed(const ModeRow& row) { return row.mode != NetworkMode::OPDS_BROWSER
 // A Join Network the user backed out of (Back while scanning, connecting or at the list) leaves the
 // radio up: CrossPointWebServerActivity starts it before the join and takes it down only in its
 // onExit(), whose ServerSession::end() restarts to Home. Replacing the stack runs that onExit(), so
-// the choice was lost to a restart to Home. Every WiFi session ends in a restart; with the radio up,
-// this one restarts into the choice. A silentRestart*() returns only while a deep sleep supersedes it.
+// the choice was lost to a restart to Home. So the session ends here (wifi_session::end()): where it
+// says reboot (the C3s), this restarts into the choice; elsewhere the radio is off and the choice
+// opens in this boot, and ServerSession::end() finds nothing left to undo. A silentRestart*()
+// returns only while a deep sleep supersedes it.
 void handOff(const NetworkMode mode) {
-  const bool radioUp = WiFi.getMode() != WIFI_MODE_NULL;
-  if (radioUp) {
-    LOG_DBG("NETMODE", "Radio left up by a cancelled join; restarting into the choice");
-    WiFi.disconnect(false);
-    delay(30);
-  }
+  const bool restart = WiFi.getMode() != WIFI_MODE_NULL && wifi_session::end("NETMODE") == wifi_session::Exit::Reboot;
+  if (restart) LOG_DBG("NETMODE", "Radio left up by a cancelled join; restarting into the choice");
   switch (mode) {
     case NetworkMode::OPDS_BROWSER:
-      if (radioUp) {
+      if (restart) {
         silentRestartToOpdsBrowser();
       } else {
         activityManager.goToBrowser();
       }
       return;
     case NetworkMode::USB_SERIAL:
-      if (radioUp) {
+      if (restart) {
         silentRestartToSerialTransfer();
       } else {
         activityManager.goToSerialTransfer();
       }
       return;
     case NetworkMode::USB_DRIVE:
-      if (radioUp) {
+      if (restart) {
         silentRestartToUsbDrive();
       } else {
         activityManager.goToUsbDrive();

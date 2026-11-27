@@ -30,6 +30,7 @@
 #include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/WifiSessionEnd.h"
 #include "util/OpdsFilename.h"
 #include "util/StringUtils.h"
 #include "util/UrlUtils.h"
@@ -310,14 +311,14 @@ void OpdsBookBrowserActivity::onExit() {
   navigationHistory.clear();
   formatSelectionLabels.clear();
   Storage.remove("/.tmp_opds_cache.dat");
-  // Before the restart below, which does not return. Every way out ends here: Back to the server
-  // list or File Transfer, Home, sleep, and a browser buried under a child when the stack is
-  // replaced (ActivityManager calls onExit() on those too).
+  // Before the restart below, which does not return where it happens. Every way out ends here: Back
+  // to the server list or File Transfer, Home, sleep, and a browser buried under a child when the
+  // stack is replaced (ActivityManager calls onExit() on those too).
   removeCoverFiles();
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(false);
-    delay(30);
+    // Where the heap allows (the PSRAM boards), the navigation leave() queued runs in this boot.
+    if (wifi_session::end("OPDS") == wifi_session::Exit::CarryOn) return;
     if (leavingToFileTransfer) {
       silentRestartToFileTransferOpds();
     } else {
@@ -1203,7 +1204,7 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
     requestUpdate(true);
     fetchFeed(currentPath);
   } else {
-    // Leave WiFi up; onExit's silent reboot handles teardown without further fragmenting.
+    // Leave WiFi up; onExit's session end (wifi_session::end()) tears it down.
     state = BrowserState::ERROR;
     errorMessage = tr(STR_WIFI_CONN_FAILED);
     requestUpdate();

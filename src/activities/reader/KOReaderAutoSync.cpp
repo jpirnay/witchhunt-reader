@@ -16,20 +16,16 @@
 #include "KOReaderDocumentId.h"
 #include "KOReaderSyncMetadata.h"
 #include "KOReaderSyncWorker.h"
+#include "network/WifiSessionVerdict.h"
 
 AutoSyncState AutoSyncState::instance;
 
 namespace {
 constexpr char AUTOSYNC_FILE_JSON[] = "/.crosspoint/autosync.json";
 
-// The client's already gating the wolfssl handshake, so this is just for association. Numbers
-// based on the worker's logs on a x4 pro.
-constexpr uint32_t ASSOCIATION_HEADROOM_BYTES = 56 * 1024;
-constexpr uint32_t BG_SESSION_MIN_FREE_INTERNAL_BYTES =
-    KOReaderSyncWorker::WORKER_STACK_BYTES + ASSOCIATION_HEADROOM_BYTES;
-// Largest single block the session needs. Association spreads across whatever is free, but the
-// request draws one chunk. Measured 14kb at its worst on a x4 pro.
-constexpr uint32_t BG_SESSION_MIN_CONTIG_INTERNAL_BYTES = 24 * 1024;
+// What a session needs to start, shared with the check at a Wi-Fi screen's exit (WifiSessionVerdict.h).
+static_assert(KOReaderSyncWorker::WORKER_STACK_BYTES == wifi_session::kWorkerStackBytes,
+              "wifi_session's free-heap minimum counts the worker's stack");
 
 KOReaderSyncJob buildSilentPushJob(const std::string& epubPath, const KOReaderPosition& localKoPos, const int spine,
                                    const int page, const std::string& title, const std::string& authors) {
@@ -170,7 +166,7 @@ bool KOReaderAutoSync::heapAllowsBackgroundSession(const char* what) {
   constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
   const uint32_t freeInternal = heap_caps_get_free_size(caps);
   const uint32_t contigInternal = heap_caps_get_largest_free_block(caps);
-  if (freeInternal < BG_SESSION_MIN_FREE_INTERNAL_BYTES || contigInternal < BG_SESSION_MIN_CONTIG_INTERNAL_BYTES) {
+  if (freeInternal < wifi_session::kMinFreeInternalBytes || contigInternal < wifi_session::kMinLargestInternalBytes) {
     LOG_DBG("AutoSync", "%s skipped: internal heap too tight (free=%lu contig=%lu)", what,
             static_cast<unsigned long>(freeInternal), static_cast<unsigned long>(contigInternal));
     return false;

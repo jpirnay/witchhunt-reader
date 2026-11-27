@@ -78,6 +78,7 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "network/OtaBootSwitch.h"
+#include "network/WifiSessionEnd.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/PluginEvents.h"
@@ -290,6 +291,8 @@ enum class BootResume : uint8_t {
 // device back up against the user's sleep gesture. Never cleared:
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
 static bool deepSleepInProgress = false;
+
+bool deepSleepSupersedesRestart() { return deepSleepInProgress; }
 
 // Arms the RTC flags setup() reads back after a silent reboot. Single entry point so a new
 // restart target cannot forget to capture the live light state along with the destination.
@@ -1964,6 +1967,7 @@ void setup() {
   allowSleepAt = millis() + 2000;
   BootDiag::logSummary();
   logStartupMemory("setup_complete");
+  wifi_session::recordBootBaseline();
 }
 
 // Dark Mode the other way, from the slide switch or a key or gesture bound to it (BTN_TOGGLE_DARK_MODE).

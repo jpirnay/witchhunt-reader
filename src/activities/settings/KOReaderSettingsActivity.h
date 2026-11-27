@@ -1,5 +1,6 @@
 #pragma once
 
+#include "KOReaderAuthActivity.h"
 #include "activities/MenuListActivity.h"
 #include "activities/reader/KOReaderAutoSync.h"
 
@@ -16,6 +17,8 @@ class KOReaderSettingsActivity final : public MenuListActivity {
  private:
   void buildMenuItems();
   void buildAutoSyncItems();
+  // Authenticate or Register: over this screen where the check ends without a restart, in place of it where it does.
+  void openAccountCheck(KOReaderAuthActivity::Mode mode);
 
   // MenuListActivity overrides
   std::string getItemValueString(int index) const override;
