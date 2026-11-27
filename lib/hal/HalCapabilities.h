@@ -388,6 +388,14 @@ inline bool hasFrontlightAndRtc() { return hasFrontlight() && hasHardwareRtc(); 
 // adjustable rather than brightness-only.
 inline bool hasColorTemperature() { return hasFrontlight() && BoardConfig::hasColorTemperatureFrontlight(); }
 
+// A haptic vibration motor is present (direct GPIO PWM or expander-controlled).
+inline bool hasHaptics() {
+  return BoardConfig::ACTIVE.haptic.gpio != BoardConfig::PIN_UNASSIGNED || BoardConfig::ACTIVE.haptic.viaExpander;
+}
+
+// The power key is wired to a direct MCU GPIO rather than an I/O expander.
+inline bool hasDirectPowerPin() { return BoardConfig::ACTIVE.input.power != BoardConfig::PIN_UNASSIGNED; }
+
 // Human-readable board name for the UI. The profile's own `name` is a build
 // slug ("xteink_x4", "lilygo_t5s3") and would read badly on screen, so the
 // display spelling lives here. Deliberately exhaustive with no default: a new
@@ -425,6 +433,8 @@ inline const char* boardDisplayName(BoardConfig::Board board) {
       return "M5Paper S3";
     case BoardConfig::Board::Picco:
       return "Picco";
+    case BoardConfig::Board::MetalioEInk4Plus:
+      return "Metalio E-Ink4 Plus";
   }
   return "Unknown";
 }

@@ -14,6 +14,7 @@
 #include <FontDecompressor.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalBoardSupport.h>
 #include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
@@ -25,10 +26,6 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <HalTiltSensor.h>
-// Board-support layer, linked only into the LilyGo env (see its lib_deps).
-#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
-#include <BoardT5S3.h>
-#endif
 #include <I18n.h>
 #include <Logging.h>
 #include <SPI.h>
@@ -116,6 +113,7 @@ EpdFont serif14BoldFont(&serif_14_bold);
 EpdFont serif14ItalicFont(&serif_14_italic);
 EpdFont serif14BoldItalicFont(&serif_14_bolditalic);
 EpdFontFamily serif14FontFamily(&serif14RegularFont, &serif14BoldFont, &serif14ItalicFont, &serif14BoldItalicFont);
+#if !defined(CP_COMPACT_BUILTIN_FONTS) || !CP_COMPACT_BUILTIN_FONTS
 EpdFont serif10RegularFont(&serif_10_regular);
 EpdFont serif10BoldFont(&serif_10_bold);
 EpdFont serif10ItalicFont(&serif_10_italic);
@@ -131,12 +129,14 @@ EpdFont serif16BoldFont(&serif_16_bold);
 EpdFont serif16ItalicFont(&serif_16_italic);
 EpdFont serif16BoldItalicFont(&serif_16_bolditalic);
 EpdFontFamily serif16FontFamily(&serif16RegularFont, &serif16BoldFont, &serif16ItalicFont, &serif16BoldItalicFont);
+#endif
 EpdFont serif18RegularFont(&serif_18_regular);
 EpdFont serif18BoldFont(&serif_18_bold);
 EpdFont serif18ItalicFont(&serif_18_italic);
 EpdFont serif18BoldItalicFont(&serif_18_bolditalic);
 EpdFontFamily serif18FontFamily(&serif18RegularFont, &serif18BoldFont, &serif18ItalicFont, &serif18BoldItalicFont);
 
+#if !defined(CP_COMPACT_BUILTIN_FONTS) || !CP_COMPACT_BUILTIN_FONTS
 EpdFont notosans10RegularFont(&notosans_10_regular);
 EpdFont notosans10BoldFont(&notosans_10_bold);
 EpdFont notosans10ItalicFont(&notosans_10_italic);
@@ -149,18 +149,21 @@ EpdFont notosans12ItalicFont(&notosans_12_italic);
 EpdFont notosans12BoldItalicFont(&notosans_12_bolditalic);
 EpdFontFamily notosans12FontFamily(&notosans12RegularFont, &notosans12BoldFont, &notosans12ItalicFont,
                                    &notosans12BoldItalicFont);
+#endif
 EpdFont notosans14RegularFont(&notosans_14_regular);
 EpdFont notosans14BoldFont(&notosans_14_bold);
 EpdFont notosans14ItalicFont(&notosans_14_italic);
 EpdFont notosans14BoldItalicFont(&notosans_14_bolditalic);
 EpdFontFamily notosans14FontFamily(&notosans14RegularFont, &notosans14BoldFont, &notosans14ItalicFont,
                                    &notosans14BoldItalicFont);
+#if !defined(CP_COMPACT_BUILTIN_FONTS) || !CP_COMPACT_BUILTIN_FONTS
 EpdFont notosans16RegularFont(&notosans_16_regular);
 EpdFont notosans16BoldFont(&notosans_16_bold);
 EpdFont notosans16ItalicFont(&notosans_16_italic);
 EpdFont notosans16BoldItalicFont(&notosans_16_bolditalic);
 EpdFontFamily notosans16FontFamily(&notosans16RegularFont, &notosans16BoldFont, &notosans16ItalicFont,
                                    &notosans16BoldItalicFont);
+#endif
 EpdFont notosans18RegularFont(&notosans_18_regular);
 EpdFont notosans18BoldFont(&notosans_18_bold);
 EpdFont notosans18ItalicFont(&notosans_18_italic);
@@ -589,7 +592,10 @@ static void serviceBootPowerRelease() {
   // reason it did — the 5 ms debounce is too short for mechanical release bounce.
   constexpr unsigned long RELEASE_STABLE_MS = 200;
   const unsigned long now = millis();
-  if (digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH) {
+  const bool powerReleased = HalCapabilities::hasDirectPowerPin()
+                                 ? (digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH)
+                                 : !gpio.isPressed(HalGPIO::BTN_POWER);
+  if (powerReleased) {
     if (bootPowerHighSince == 0) bootPowerHighSince = now;
   } else {
     bootPowerHighSince = 0;
@@ -768,6 +774,7 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   // ADC read races with that teardown. From here sleep prep reads the power pin
   // directly (HalGPIO::startDeepSleep / waitForStablePowerRelease).
   gpio.stopInputSampler();
+  HalBoardSupport::prepareForDeepSleep();
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = fromReader;
   const bool keepLpAlive = keepClockAliveForSleep();
@@ -908,16 +915,22 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
 // each step's growth to the metrics that have to hold its text.
 void applyUiFontScale() {
   const bool large = SETTINGS.uiFontSize == CrossPointSettings::UI_FONT_SIZE_LARGE;
-#if FREEINK_DEVICE_MURPHY
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
   // Murphy's three roles are two points smaller than the corresponding roles on other boards.
   // Its Large choice therefore matches other devices' Normal choice across all three slots.
   renderer.replaceFont(SMALL_FONT_ID, large ? smallFontFamily : murphySmall6FontFamily);
   renderer.replaceFont(UI_10_FONT_ID, large ? ui10FontFamily : ui8FontFamily);
   renderer.replaceFont(UI_12_FONT_ID, large ? ui12FontFamily : ui10FontFamily);
 #else
-  renderer.replaceFont(SMALL_FONT_ID, large ? ui10FontFamily : smallFontFamily);
-  renderer.replaceFont(UI_10_FONT_ID, large ? ui12FontFamily : ui10FontFamily);
-  renderer.replaceFont(UI_12_FONT_ID, large ? ui14FontFamily : ui12FontFamily);
+  if constexpr (PanelMetrics::LARGE) {
+    renderer.replaceFont(SMALL_FONT_ID, ui12FontFamily);
+    renderer.replaceFont(UI_10_FONT_ID, large ? ui14FontFamily : ui12FontFamily);
+    renderer.replaceFont(UI_12_FONT_ID, ui14FontFamily);
+  } else {
+    renderer.replaceFont(SMALL_FONT_ID, large ? ui10FontFamily : smallFontFamily);
+    renderer.replaceFont(UI_10_FONT_ID, large ? ui12FontFamily : ui10FontFamily);
+    renderer.replaceFont(UI_12_FONT_ID, large ? ui14FontFamily : ui12FontFamily);
+  }
 #endif
 
   // UiFontLadder::STEPS is what the themes size their rows from, so it has to describe the
@@ -971,16 +984,25 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   renderer.insertFont(FIT_TITLE_FONT_ID, ui12FontFamily);
 #endif
   renderer.insertFont(SERIF_14_FONT_ID, serif14FontFamily);
+  renderer.insertFont(SERIF_18_FONT_ID, serif18FontFamily);
+  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
+  renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
+#if defined(CP_COMPACT_BUILTIN_FONTS) && CP_COMPACT_BUILTIN_FONTS
+  // Two bitmap masters fit alongside another firmware in a 5 MiB OTA layout.
+  renderer.insertScaledFont(SERIF_10_FONT_ID, serif14FontFamily, TextScale::ratio(10, 14));
+  renderer.insertScaledFont(SERIF_12_FONT_ID, serif14FontFamily, TextScale::ratio(12, 14));
+  renderer.insertScaledFont(SERIF_16_FONT_ID, serif18FontFamily, TextScale::ratio(16, 18));
+  renderer.insertScaledFont(NOTOSANS_10_FONT_ID, notosans14FontFamily, TextScale::ratio(10, 14));
+  renderer.insertScaledFont(NOTOSANS_12_FONT_ID, notosans14FontFamily, TextScale::ratio(12, 14));
+  renderer.insertScaledFont(NOTOSANS_16_FONT_ID, notosans18FontFamily, TextScale::ratio(16, 18));
+#else
   renderer.insertFont(SERIF_10_FONT_ID, serif10FontFamily);
   renderer.insertFont(SERIF_12_FONT_ID, serif12FontFamily);
   renderer.insertFont(SERIF_16_FONT_ID, serif16FontFamily);
-  renderer.insertFont(SERIF_18_FONT_ID, serif18FontFamily);
-
   renderer.insertFont(NOTOSANS_10_FONT_ID, notosans10FontFamily);
   renderer.insertFont(NOTOSANS_12_FONT_ID, notosans12FontFamily);
-  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
-  renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
+#endif
 
   // 20/22/24/26 pt have no faces: they render the 18 pt master scaled, x1.11 to x1.44. Real faces
   // cost about half a megabyte per size (20 pt's eight were 505,656 B) that the app partition does
@@ -1321,6 +1343,7 @@ void setup() {
   // re-runs holdPowerRails() with the resolved profile. It stays ahead of the serial
   // bring-up below because that one spends 250 ms in delay(): on a non-self-latching
   // unit the rail must already be held before anything blocks for that long.
+  HalBoardSupport::earlyBoot();
   BoardConfig::holdPowerRails();
 
   // On a power-on reset the RTC timer started with the rail, so it minus millis() is what ran before the app: the ROM
@@ -1344,7 +1367,7 @@ void setup() {
   // released during it found the pin HIGH and was refused, so it lengthened the hold every
   // wake needs, release builds included. Neither this nor the NVS read logs anything, which
   // is all the TX timeout below has to come first for.
-  {
+  if (HalCapabilities::hasDirectPowerPin()) {
     const auto hold = CrossPointSettings::wakeHoldFor(BootDiag::preAppMs());
     BootDiag::setWakeCheck(
         gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), hold.requiredMs, hold.heldBeforeAppMs));
@@ -1384,6 +1407,7 @@ void setup() {
   // usbDetect pin, so that gate can read false precisely when this matters.
   // CDC_ON_BOOT means the core has already begun Serial, so this is valid here.
   logSerial.setTxTimeoutMs(1);
+  markSerialLogReady();
 #endif
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
@@ -1454,22 +1478,6 @@ void setup() {
     setSerialWireMuted(true);
   }
 
-#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
-  // LilyGo T5S3 board-support, FIRST: its begin() owns the shared I2C bring-up
-  // and the SD SPI bus, deselects the LoRa radio that shares that bus (an
-  // undriven CS there corrupts SD transactions), disables LoRa/GPS, configures
-  // the BOOT button, and registers the PCA9535 expander's user button through
-  // InputManager::setButtonHook(). Without it the board has no working buttons
-  // at all and an uncontested SPI bus. Placement matches upstream/feat-touch.
-  BoardT5S3::begin();
-
-  // The board-profile corrections that used to live here (capacitive home key,
-  // PCF8563 RTC, bezel insets) are now upstream in LILYGO_T5_PRO_GT911 via
-  // Free-Ink/freeink-sdk#47, so the overrides are gone. BoardT5S3::begin() above
-  // still has to run before gpio.begin(), because it owns the shared I2C bring-up
-  // and the SD SPI bus and registers the PCA9535 button hook.
-#endif
-
   powerManager.setSleepStepHook(onSleepStep);
   HalSystem::begin();
   // Create the shared-SPI-bus mutex before anything can touch the panel or the
@@ -1479,21 +1487,7 @@ void setup() {
   // mutex before gpio.begin() can start the sampler, so no first-use allocation
   // lands in a touch poll. Compiles away on non-touch boards.
   HalI2cBus::begin();
-#if BOARD_SUPPORT_OWNS_BUSES
-  // One lock for one bus. The board-support layer drives the PCA9535 and the
-  // TPS65185 under a mutex of its own, and LovyanGFX's EPD panel task runs those
-  // helpers on EVERY refresh to raise the panel rails -- while the GT911 is
-  // polled from the input sampler and the RTC and gauge from this task, all
-  // under HalI2cBus. Two mutexes over one Wire serialise nothing, and the
-  // failure is not a bad register read: a collided power-up returns false,
-  // Panel_EPD's task ignores that, and the frame is clocked out with the
-  // high-voltage rails down -- a page that lands weakly or not at all, then gets
-  // repainted by the next refresh.
-  //
-  // Here rather than inside HalI2cBus because this is the one file that already
-  // knows which board it is; the HAL takes a handle and asks no questions.
-  HalI2cBus::adoptMutex(BoardT5S3::i2cMutexHandle());
-#endif
+  HalBoardSupport::begin();
   gpio.begin();
   // Bus start-up must follow gpio.begin(): that runs inputMgr.begin(), and on a
   // touch board the SDK's GT911 init starts the shared I2C bus itself. The owner
@@ -1501,7 +1495,9 @@ void setup() {
   HalI2cBus::ensureBusStarted();
   powerManager.begin();
   halTiltSensor.begin();
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
+#endif
   BootDiag::markPhase(BootPhase::HwInit);
 
   const auto wakeupReason = gpio.getWakeupReason();
@@ -1535,6 +1531,7 @@ void setup() {
 #ifdef ENABLE_SERIAL_LOG
   if (openSerialLogIfHostPresent()) {
     BootDiag::markPhase(BootPhase::SerialUp);
+    HalBoardSupport::onSerialReady();
   }
 #endif
 
@@ -1588,7 +1585,8 @@ void setup() {
 #endif
   logStartupMemory("after_hw_init");
 
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !BootDiag::wakeCheck().accepted()) {
+  if (HalCapabilities::hasDirectPowerPin() && wakeupReason == HalGPIO::WakeupReason::PowerButton &&
+      !BootDiag::wakeCheck().accepted()) {
     LOG_INF("BOOT", "Wake gate rejected the press (%s), returning to deep sleep",
             HalGPIO::wakeVerdictName(BootDiag::wakeCheck().verdict));
     halTiltSensor.deepSleep();

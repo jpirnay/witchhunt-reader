@@ -16,6 +16,7 @@
 
 #include <cassert>
 
+#include "HalBoardSupport.h"
 #include "HalFrontlight.h"
 #include "HalGPIO.h"
 #include "HalI2cBus.h"
@@ -249,6 +250,9 @@ void HalPowerManager::exitWaveformWait() {
 // the comment there for why our background button sampler needs it, and
 // catchUpTicksOnCore0() for where it has to run on a dual-core chip.
 bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
+  if (!HalBoardSupport::allowsLightSleep()) {
+    return false;
+  }
   const unsigned long entryMs = millis();
   if (lastSliceEndMs_ != 0) {
     lightSleepStats_.awakeMs += entryMs - lastSliceEndMs_;
@@ -426,6 +430,9 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
+  if (HalBoardSupport::enterDeepSleep()) {
+    return;
+  }
   LOG_DBG("PWR", "startDeepSleep: isPressed=%d, rawPin=%d, keepClock=%d", gpio.isPressed(HalGPIO::BTN_POWER),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW, keepClockAlive);
 
@@ -476,11 +483,15 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     // Without this, gpio_set_level() below silently fails and GPIO13 is stuck in its prior state,
     // causing the device to enter a sleep/wake loop that requires a hardware reset to escape.
     gpio_hold_dis(GPIO_SPIWP);
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     gpio_deep_sleep_hold_dis();
+#endif
     gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_SPIWP, keepClockAlive ? 1 : 0);
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
+#endif
     gpio_hold_en(GPIO_SPIWP);
   } else {
     // Same release, for the boards that reach GPIO13 through the SDK's rail teardown
@@ -494,7 +505,9 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     if (gpio.isXteinkDevice()) {
       gpio_hold_dis(GPIO_NUM_13);
     }
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     gpio_deep_sleep_hold_dis();
+#endif
 
     // Hold every configured power-latch pin HIGH through deep sleep. These are keep-alive
     // enables — the X4 Pro's master peripheral rail on GPIO1 — and
@@ -529,8 +542,10 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     }
 
     freeink::PowerManager::powerDownRailsForSleep();
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
+#endif
   }
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
   if (sleepStepHook_) sleepStepHook_(SleepStep::RailsConfigured, 0, false, gpio13IsBatteryLatch);
@@ -555,11 +570,16 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   // and uses the dedicated deep-sleep GPIO path, while the S3 wakes from EXT1
   // over its RTC GPIOs (the X4 Pro power key is GPIO3, which is RTC-capable).
   // Both boards' power keys are active-LOW, matching the level used here.
-  constexpr uint64_t powerPinMask = 1ULL << InputManager::POWER_BUTTON_PIN;
+#if SOC_PM_SUPPORT_EXT1_WAKEUP || SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
+  if constexpr (InputManager::POWER_BUTTON_PIN >= 0) {
+    constexpr uint64_t powerPinMask = 1ULL
+                                      << (InputManager::POWER_BUTTON_PIN >= 0 ? InputManager::POWER_BUTTON_PIN : 0);
 #if SOC_PM_SUPPORT_EXT1_WAKEUP
-  esp_sleep_enable_ext1_wakeup_io(powerPinMask, ESP_EXT1_WAKEUP_ANY_LOW);
+    esp_sleep_enable_ext1_wakeup_io(powerPinMask, ESP_EXT1_WAKEUP_ANY_LOW);
 #elif SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
-  esp_deep_sleep_enable_gpio_wakeup(powerPinMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+    esp_deep_sleep_enable_gpio_wakeup(powerPinMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+#endif
+  }
 #else
 #error "No deep-sleep wake source available for this target — add one before enabling this board."
 #endif

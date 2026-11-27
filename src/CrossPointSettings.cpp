@@ -61,6 +61,11 @@ void CrossPointSettings::applyDeviceButtonDefaults() {
     btnDoublePower = BTN_BACK;
   }
 
+  if (BoardConfig::isMetalioEInk4Plus()) {
+    btnLongBack = BTN_GO_HOME;
+    btnShortPower = BTN_GO_HOME;
+  }
+
   if (!BoardConfig::isMurphyM3() || input.confirm < 0) return;
 
   if (input.back < 0) btnDoubleConfirm = BTN_BACK;

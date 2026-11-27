@@ -2,6 +2,11 @@
 #include <HalCapabilities.h>
 #include <HalGPIO.h>
 #include <HalI2cBus.h>
+
+#include "HalBoardSupport.h"
+#if FREEINK_CAP_HAPTIC
+#include <HapticManager.h>
+#endif
 #include <Logging.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -170,6 +175,11 @@ void HalGPIO::begin() {
   //   display.cs, SPI_MISO 7 = sd.miso, BAT_GPIO0 0 = batteryAdc,
   //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
+#if FREEINK_CAP_HAPTIC
+  if (HalCapabilities::hasHaptics()) {
+    HapticManager::getInstance().begin();
+  }
+#endif
 
 #if defined(SERIAL_TEST_API) && SERIAL_TEST_API
   // Beside the board's own hook (the T5S3's expander button), not in its place. Without a free slot the held
@@ -337,6 +347,11 @@ void HalGPIO::latchTouchEvents() {
     tap.heldMs = heldMs;
     tap.atMs = now;
     push(tap);
+#if FREEINK_CAP_HAPTIC
+    if (HalCapabilities::hasHaptics()) {
+      HapticManager::getInstance().pulse();
+    }
+#endif
   }
 
   if (inputMgr.wasTouchReleased()) {
@@ -409,6 +424,14 @@ void HalGPIO::sampleOnce() {
   // takes inputMux_ itself.
   latchTouchGestures(now);
   latchTouchEvents();
+#if FREEINK_CAP_HAPTIC
+  if (HalCapabilities::hasHaptics()) {
+    const uint8_t bezelPageKeys = (1u << BTN_LEFT) | (1u << BTN_RIGHT);
+    if ((released & bezelPageKeys) || inputMgr.wasHomeKeyTapped() || inputMgr.wasHomeKeyLongPressed()) {
+      HapticManager::getInstance().pulse();
+    }
+  }
+#endif
 #endif
 
   // Capacitive home key -> synthetic CONFIRM button.
@@ -462,8 +485,13 @@ void HalGPIO::sampleOnce() {
     if (homeKeyHeld_ && inputMgr.wasHomeKeyLongPressed()) {
       homeKeyHeld_ = false;
       if (homeKeyDrivesBack_) {
-        pressed |= (1u << BTN_BACK);
-        released |= (1u << BTN_BACK);
+        if (!homeKeyDrivesConfirm_) {
+          // Board has a dedicated Confirm key, so tap already sends short Back; hold sends long Back.
+          injectPress(BTN_BACK, true);
+        } else {
+          pressed |= (1u << BTN_BACK);
+          released |= (1u << BTN_BACK);
+        }
       }
     }
     if (homeKeyHeld_ && inputMgr.wasHomeKeyTapped()) {
@@ -471,6 +499,9 @@ void HalGPIO::sampleOnce() {
       if (homeKeyDrivesConfirm_) {
         pressed |= (1u << BTN_CONFIRM);
         released |= (1u << BTN_CONFIRM);
+      } else if (homeKeyDrivesBack_) {
+        pressed |= (1u << BTN_BACK);
+        released |= (1u << BTN_BACK);
       }
     }
   }
@@ -1271,6 +1302,10 @@ bool HalGPIO::canDetectUsbElectrically() const {
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
+  WakeupReason boardReason = WakeupReason::Other;
+  if (HalBoardSupport::overrideWakeupReason(boardReason)) {
+    return boardReason;
+  }
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
 #if SOC_PM_SUPPORT_EXT1_WAKEUP

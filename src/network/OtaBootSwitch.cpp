@@ -1,6 +1,7 @@
 #include "OtaBootSwitch.h"
 
 #include <Logging.h>
+#include <esp_app_desc.h>
 #include <esp_ota_ops.h>
 #include <esp_rom_crc.h>
 #include <spi_flash_mmap.h>
@@ -16,6 +17,15 @@ const esp_partition_t* idleAppPartition() {
   const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
   const esp_partition_t* running = esp_ota_get_running_partition();
   if (next == nullptr || (running != nullptr && next->address == running->address)) return nullptr;
+  // Skip the inactive slot when it holds another firmware (e.g. dual-OS vendor slot).
+  esp_app_desc_t nextDesc = {};
+  if (esp_ota_get_partition_description(next, &nextDesc) == ESP_OK) {
+    const esp_app_desc_t* runningDesc = esp_app_get_description();
+    if (runningDesc != nullptr &&
+        strncmp(nextDesc.project_name, runningDesc->project_name, sizeof(nextDesc.project_name)) != 0) {
+      return nullptr;
+    }
+  }
   return next;
 }
 
