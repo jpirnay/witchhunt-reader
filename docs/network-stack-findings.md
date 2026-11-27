@@ -257,6 +257,12 @@ exit leads; no panic in any log or in `CMD:BOOTLOG`.
   (`background_sync::waitBeforeRadioUse()`).
 - During sessions that overlapped the worker the X4 Pro's largest block read 45,044 at its lowest, above the 24,576
   minimum.
+- **After the leftovers** (`fix/wifi-session-leftovers`), on both boards: a global action (Go Home, from a bound
+  gesture) taken over Wi-Fi Networks, Weather's city search or Sync Time's join screen logged `[ACT] The screens left
+  the radio up; ending the session` and `Session end [ACT] ... -> carry on` (169,016-170,164 free), landed on Home,
+  and a later join worked. A serial `BTN:BACK:LONG` cannot stand in for a bound key: it arrives as a plain Back. On
+  the X4 Pro, Wi-Fi Networks and Sync Time opened during a background push logged `Waiting for the background sync
+  before using the radio`, and the push finished (HTTP 200) before the screen joined.
 
 ## Retired hypotheses
 
