@@ -9,11 +9,17 @@
 //                   says no); takes effect after CMD:REBOOT. CMD:BLE:MEM reports the current state.
 //
 // Each reply lists free/largest-free-block after every step, and the since-boot minimum. REBOOT between runs.
+//
+// With `custom_ble_spike_controller = flash` (scripts/ble_spike_flash_ctrl.py) the build links Espressif's
+// flash-only controller instead; BLE_SPIKE_FLASH_CTRL then compiles the stand-ins for flash-only bt.c below. CTRL and
+// HOST both report run_in_flash/irq_iram_cleared, the proof that the stand-ins took effect.
 #include <Arduino.h>
 #include <BleKeyboardHost.h>
 #include <esp32-hal-bt.h>
 #include <esp_bt.h>
 #include <esp_heap_caps.h>
+#include <esp_intr_alloc.h>
+#include <esp_memory_utils.h>
 #include <esp_system.h>
 #include <nvs.h>
 
@@ -35,6 +41,47 @@ extern "C" bool bleInUse(void) {
   }
   return keep != 0;
 }
+
+#ifndef BLE_SPIKE_FLASH_CTRL
+#define BLE_SPIKE_FLASH_CTRL 0
+#endif
+
+namespace {
+// Controller interrupts whose IRAM flag the wrapper below cleared (flash-only controller only).
+std::atomic<uint32_t> irqFlagsCleared{0};
+// Set around esp_bt_controller_init() in controllerOn(): the only window in which the wrapper touches a call.
+std::atomic<bool> inControllerInit{false};
+}  // namespace
+
+#if BLE_SPIKE_FLASH_CTRL
+// The flash-only controller (scripts/ble_spike_flash_ctrl.py) with the prebuilt bt.c, which was compiled for the
+// ROM-assisted one. Flash-only bt.c (IDF v5.5.5 components/bt/controller/esp32c3/bt.c) skips these ROM-table resets
+// (line 1355), and the flash-only library does not define them.
+extern "C" void ble_dtm_funcs_reset(void) {}
+extern "C" void ble_scan_funcs_reset(void) {}
+extern "C" void ble_42_adv_funcs_reset(void) {}
+extern "C" void ble_init_funcs_reset(void) {}
+extern "C" void ble_con_funcs_reset(void) {}
+extern "C" void ble_ext_adv_funcs_reset(void) {}
+extern "C" void ble_ext_scan_funcs_reset(void) {}
+extern "C" void ble_base_funcs_reset(void) {}
+extern "C" void ble_enc_funcs_reset(void) {}
+
+// Flash-only bt.c allocates the controller interrupt without ESP_INTR_FLAG_IRAM (line 874): its handler is in flash,
+// and IDF refuses an IRAM-flagged interrupt whose handler is not in IRAM. Linked with -Wl,--wrap=esp_intr_alloc;
+// only calls made inside esp_bt_controller_init() for a handler outside IRAM are changed.
+extern "C" esp_err_t __real_esp_intr_alloc(int source, int flags, intr_handler_t handler, void* arg,
+                                           intr_handle_t* ret_handle);
+extern "C" esp_err_t __wrap_esp_intr_alloc(int source, int flags, intr_handler_t handler, void* arg,
+                                           intr_handle_t* ret_handle) {
+  if (inControllerInit.load() && (flags & ESP_INTR_FLAG_IRAM) && handler != nullptr &&
+      !esp_ptr_in_iram(reinterpret_cast<const void*>(handler))) {
+    flags &= ~ESP_INTR_FLAG_IRAM;
+    irqFlagsCleared.fetch_add(1);
+  }
+  return __real_esp_intr_alloc(source, flags, handler, arg, ret_handle);
+}
+#endif
 
 namespace {
 
@@ -94,9 +141,16 @@ std::string controllerOn() {
   std::string out = "BLE_CTRL:";
   appendHeap(out, "pre");
   if (controllerUp) return out + " error=already_up";
+  // With the flash-only controller, scripts/ble_spike_nimble_c3.h defines CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY, so the
+  // macro sets .run_in_flash = 1.
   esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+  appendNumber(out, "run_in_flash", cfg.run_in_flash);
   const unsigned long t0 = millis();
+  inControllerInit.store(true);
   esp_err_t err = esp_bt_controller_init(&cfg);
+  inControllerInit.store(false);
+  appendNumber(out, "flash_ctrl", BLE_SPIKE_FLASH_CTRL);
+  appendNumber(out, "irq_iram_cleared", static_cast<long>(irqFlagsCleared.load()));
   if (err != ESP_OK) {
     appendNumber(out, "init_err", err);
     return out;
@@ -153,7 +207,12 @@ std::string hostOn() {
   appendHeap(out, "pre");
   if (controllerUp) return out + " error=controller_up";
   const unsigned long t0 = millis();
-  if (!BleHid.begin("WitchSpike")) {
+  inControllerInit.store(true);  // NimBLE initialises the controller inside begin()
+  const bool begun = BleHid.begin("WitchSpike");
+  inControllerInit.store(false);
+  appendNumber(out, "flash_ctrl", BLE_SPIKE_FLASH_CTRL);
+  appendNumber(out, "irq_iram_cleared", static_cast<long>(irqFlagsCleared.load()));
+  if (!begun) {
     appendHeap(out, "begin_failed");
     return out;
   }
@@ -194,6 +253,7 @@ std::string hostOff() {
 
 std::string memState(const char* head) {
   std::string out = head;
+  appendNumber(out, "flash_ctrl", BLE_SPIKE_FLASH_CTRL);
   appendNumber(out, "released", btMemReleased(BT_MODE_BLE) ? 1 : 0);
   appendNumber(out, "keep_next_boot", bleInUse() ? 1 : 0);
   appendHeap(out, "now");

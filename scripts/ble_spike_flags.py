@@ -8,6 +8,10 @@ Import("env")  # noqa: F821
 
 _header = os.path.join(env.subst("$PROJECT_DIR"), "scripts", "ble_spike_nimble_c3.h")  # noqa: F821
 _flags = ["-include", _header, "-DFREEINK_CAP_BLE_HID_HOST=1"]
+# `custom_ble_spike_controller = flash`: scripts/ble_spike_flash_ctrl.py links the flash-only controller, and
+# src/BleSpike.cpp compiles what stands in for flash-only bt.c.
+if env.GetProjectOption("custom_ble_spike_controller", "rom") == "flash":  # noqa: F821
+    _flags.append("-DBLE_SPIKE_FLASH_CTRL=1")
 _markers = ("nimble-arduino", "blekeyboardhost", "blespike.cpp")
 
 

@@ -28,3 +28,10 @@
 #define CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT 12
 #undef CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT
 #define CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT 8
+
+#if BLE_SPIKE_FLASH_CTRL
+// The flash-only controller (scripts/ble_spike_flash_ctrl.py): esp_bt.h's BT_CONTROLLER_INIT_CONFIG_DEFAULT() then
+// sets .run_in_flash = 1, in src/BleSpike.cpp and in NimBLE's two init paths (NimBLEDevice.cpp, nimble_port.c).
+#undef CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY
+#define CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY 1
+#endif
