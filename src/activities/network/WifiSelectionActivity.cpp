@@ -28,6 +28,7 @@
 #include "components/UITheme.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "network/BackgroundSyncWait.h"
 #include "network/MacFormat.h"
 #include "network/WifiApChoice.h"
 #include "util/PluginEvents.h"
@@ -185,6 +186,10 @@ void WifiSelectionActivity::onEnter() {
   // every one of them releases the secondary buffer during its session anyway, so this only
   // moves the release earlier. The primary buffer stays, so this activity keeps rendering.
   trimMemoryForNetworkSession(renderer, "WIFI");
+
+  // The scan or the join below would cut off a background push mid-request (seen on the Murphy, 2026-11-27: the scan
+  // disconnected the worker, reason 8, and its push was lost): wait for it first, with the scanning message up.
+  background_sync::waitBeforeRadioUse("WIFI", [this] { requestUpdateAndWait(); });
 
   // Trigger first update to show scanning message
   requestUpdate();
