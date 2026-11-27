@@ -14,7 +14,7 @@ class SyncTimeActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum State { CONNECTING, SYNCING, SUCCESS, FAILED };
+  enum State { WAITING_FOR_SYNC, CONNECTING, SYNCING, SUCCESS, FAILED };
   State state = CONNECTING;
   time_t preSyncTime = 0;
   time_t prevSyncTime = 0;

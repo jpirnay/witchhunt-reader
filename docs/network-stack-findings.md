@@ -264,6 +264,70 @@ Measured for the in-place return after a Wi-Fi screen (`wifi_session::end()`,
   normally. A test build with the free minimum at 500,000 logged `[ERR] ... under the minimums 500000/24576;
   restarting` and restarted into Clock settings.
 
+### Wi-Fi session end on the X4 Pro and the Murphy (2026-11-27)
+
+PR 1's screens on two more PSRAM boards, master ade8ab0ef, internal free / largest block at the session end. Boot
+baselines: X4 Pro 192,324 / 147,444, Murphy 192,736 / 147,444. Every screen carried on and landed where its ordinary
+exit leads; no panic in any log or in `CMD:BOOTLOG`.
+
+| Screen (log tag) | X4 Pro | Murphy |
+|---|---|---|
+| Sync Time (`NTP`), the boot's first session | 137,336 / 63,476 | 138,512 / 63,476 |
+| Detect Timezone (`TZ`) | 136,772 / 63,476 | 137,668 / 63,476 (first of five) |
+| Wi-Fi Networks (`SET`) | 138,312 / 63,476 | 138,096 / 61,428 |
+| Weather's city search (`SET`) | 138,580 / 63,476 | 139,472 / 63,476 |
+| Weather, joined (`WEATHER`) | 167,640 / 63,476 | 167,564 / 63,476 |
+| KOReader sync from a book (`KOSync`) | 168,416 / 63,476 | not run: no account |
+| KOReader account check (`KOAuth`) | 135,256 / 49,140, Settings | 148,124 / 63,476, from the reader menu's setup row: back on KOReader settings over the book, then the menu with its Sync tab rebuilt |
+
+- **Five KOReader syncs in a row on the X4 Pro** ended at 168,192, 168,168, 168,104, 168,124 and 168,096, the largest
+  block at 63,476 each time: about 24 B a session. A Sync Time after them joined and synced. The book's first page
+  after each in-place sync refreshed HALF (`openBook()`, 50ed9230f).
+- **Five Detect Timezone runs in a row on the Murphy kept about 545 B a session:** 137,668, 137,116, 136,584,
+  136,024, 135,492, and Clock settings' heap fell 138,404 to 135,340 over the five. Each run makes two TLS requests
+  to two hosts. What keeps the memory is not identified (future_work, wifi-session-end). The largest block fell to
+  61,428 from the fourth run, whose handshake was TLS 1.2 / SECP521R1, and read 63,476 again after the next screen.
+- **The worker busy at a screen's exit did not reproduce through the UI.** The worker's push took 4.2-6 s, and the
+  shortest way through the screens to a Wi-Fi screen's exit 3-7 s, because each screen change waits for the previous
+  render pass (1.2-1.7 s on the X4 Pro's panel). Six tries; each time the worker had finished first.
+- **Opening Wi-Fi Networks during a background push cut the push off** (X4 Pro): the picker's scan disconnected
+  the worker while it associated (`reason=8 ASSOC_LEAVE`), its auto-connect timed out 10 s later, and that push
+  was lost. Older than the session end. The picker now waits for the worker first
+  (`background_sync::waitBeforeRadioUse()`).
+- During sessions that overlapped the worker the X4 Pro's largest block read 45,044 at its lowest, above the 24,576
+  minimum.
+- **After the leftovers** (`fix/wifi-session-leftovers`), on both boards: a global action (Go Home, from a bound
+  gesture) taken over Wi-Fi Networks, Weather's city search or Sync Time's join screen logged `[ACT] The screens left
+  the radio up; ending the session` and `Session end [ACT] ... -> carry on` (169,016-170,164 free), landed on Home,
+  and a later join worked. A serial `BTN:BACK:LONG` cannot stand in for a bound key: it arrives as a plain Back. On
+  the X4 Pro, Wi-Fi Networks and Sync Time opened during a background push logged `Waiting for the background sync
+  before using the radio`, and the push finished (HTTP 200) before the screen joined.
+
+### Wi-Fi session end on a C3 without the restart: the restart stays (X3 spike, 2026-11-27)
+
+Could the C3s carry on too? A throwaway build (`spike/c3-wifi-carry-on`, master plus #942-#944, never merged) took
+the secondary framebuffer back at every session end (`reallocSecondaryBuffer()`, 52,272 B on the X3), carried on
+when that worked and restarted when it did not. Internal free / largest block at the session end:
+
+- **The buffer mostly cannot come back.** In 7 of 14 session ends the largest block was 27,636-45,044 B, short of
+  the buffer, and the re-allocation failed: the first KOReader sync from Home, Sync Time, Weather, Wi-Fi Networks,
+  the account check, the Font Manager. The long-lived blocks a session leaves land inside the 52 KB the trim freed.
+- **When it does, too little is left for Wi-Fi.** Six carried on (from 53-65 KB in one block). Five kept
+  54,644-60,856 free with a largest block of 14,324-25,588 B, and the third KOReader sync in such a boot was refused:
+  `Insufficient contiguous heap for TLS: 22516 available, 26624 required`. The sixth, a Sync Time, carried on into
+  Clock settings at 21,176 / 6,644. File Transfer, the fourteenth, restarts regardless.
+- **The reader held up after a carry-on**: ten pages with a chapter crossing, a second book with pictures, eight
+  section builds with `failedAlloc=0`, anti-aliasing on, at 44-45 KB free and a 22,516 B largest block (38,900 B in
+  the same book after a restart).
+- **The S3 minimums are no rule for a C3.** They said carry on at every failed re-allocation (free reads high with
+  the buffer out) and restart at every successful one.
+- File Transfer releases both framebuffers, so it restarts on a C3 in any case.
+
+So the C3s keep restarting after every Wi-Fi session (`HalCapabilities::restartsAfterWifiSession()`). Not tried:
+carrying on without the secondary buffer, which leaves the reader without anti-aliasing, the next-page pre-render
+and the background builds; and starting the network tasks at boot, before the framebuffers
+(future_work, wifi-session-end).
+
 ## Retired hypotheses
 
 Each of these was believed, acted on, and disproven. Do not re-propose without new evidence.

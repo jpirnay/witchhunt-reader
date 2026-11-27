@@ -17,6 +17,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/BackgroundSyncWait.h"
 #include "network/HttpDownloader.h"
 #include "network/WifiSessionEnd.h"
 #include "util/TimezoneDetectMap.h"
@@ -128,6 +129,19 @@ bool detectTimezoneSetting(uint8_t& outSetting, std::string& outIana, bool& outD
 void DetectTimezoneActivity::onEnter() {
   Activity::onEnter();
 
+  // Before this screen joins, or turns the radio off after its request: a background push may hold it.
+  background_sync::waitBeforeRadioUse("CLK", [this] {
+    {
+      RenderLock lock(*this);
+      state = WAITING_FOR_SYNC;
+    }
+    requestUpdateAndWait();
+  });
+  if (state == WAITING_FOR_SYNC) {
+    RenderLock lock(*this);
+    state = CONNECTING;
+  }
+
   // Free the heap the WiFi stack needs before it is brought up, not after -
   // association itself is the allocation-heavy step, well ahead of TLS. Matters
   // most here because SettingsActivity is still on the stack below us with its
@@ -151,7 +165,9 @@ void DetectTimezoneActivity::onEnter() {
 
 void DetectTimezoneActivity::onExit() {
   Activity::onExit();
-  HalClock::wifiOff();
+  // The session end turns the radio off itself, and not under a busy background sync. Left by a global action while
+  // the join screen was still up (wifiWasUsed_ unset), the radio stays up for the screen change to end the session
+  // toward where it was going (ActivityManager, endWifiSessionLeftUp()).
   // The C3s reboot; the PSRAM boards return to Clock settings in this boot while the heap allows.
   if (wifiWasUsed_ && wifi_session::end("TZ") == wifi_session::Exit::Reboot) {
     silentRestartToClockSettings();
@@ -217,6 +233,13 @@ void DetectTimezoneActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer,
                  Rect(contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight),
                  tr(STR_DETECT_TIMEZONE));
+
+  if (state == WAITING_FOR_SYNC) {
+    renderer.drawCenteredText(UI_10_FONT_ID, bodyRect.y + bodyRect.height / 2, tr(STR_KO_BG_SYNC_WAIT), true,
+                              EpdFontFamily::BOLD);
+    renderer.displayBuffer();
+    return;
+  }
 
   if (state == CONNECTING) {
     renderer.drawCenteredText(UI_10_FONT_ID, bodyRect.y + bodyRect.height / 2, tr(STR_CONNECTING), true,

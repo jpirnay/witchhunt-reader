@@ -8,6 +8,7 @@
 #include <HalPowerManager.h>
 #include <Logging.h>
 #include <Memory.h>  // makeUniqueNoThrow
+#include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
@@ -38,7 +39,9 @@
 #include "network/CrossPointWebServerActivity.h"
 #include "network/SerialTransferActivity.h"
 #include "network/UsbDriveActivity.h"
+#include "network/WifiSessionEnd.h"
 #include "reader/KOReaderSyncActivity.h"
+#include "reader/KOReaderSyncWorker.h"  // and KOReaderAutoSync.h
 #include "reader/ReaderActivity.h"
 #include "settings/ClockSettingsActivity.h"
 #include "settings/KOReaderSettingsActivity.h"
@@ -116,6 +119,25 @@ static void logActivityStackState(const char* stage, Activity* currentActivity, 
 #else
 static inline void logActivityStackState(const char*, Activity*, size_t) {}
 #endif
+
+// A replace that unwound the stack, such as a global action, can leave the radio up: the Wi-Fi picker leaves it to the
+// screen that opened it, whose session end then never ran (Settings' Wi-Fi actions end theirs in a result handler,
+// endRadioLeftOnBySettingAction(); the clock screens only once their join is done). Ended once every screen has exited,
+// unless the next one takes the radio over (it uses Wi-Fi) or the background sync holds it (the worker turns it off
+// itself). A restart goes where the replace was going: the open book for a reader, otherwise Home.
+static void endWifiSessionLeftUp(const Activity& next) {
+  if (WiFi.getMode() == WIFI_MODE_NULL || next.usesWifi()) return;
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (KOReaderSyncWorker::isBusy()) return;
+#endif
+  LOG_INF("ACT", "The screens left the radio up; ending the session");
+  if (wifi_session::end("ACT") == wifi_session::Exit::CarryOn) return;
+  if (next.isReaderActivity()) {
+    silentRestartToReader();
+  } else {
+    silentRestart();
+  }
+}
 
 void ActivityManager::renderTaskTrampoline(void* param) {
   auto* self = static_cast<ActivityManager*>(param);
@@ -441,6 +463,7 @@ void ActivityManager::loop() {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
         }
+        endWifiSessionLeftUp(*pendingActivity);
         if (shouldUnloadSdFont) {
           unloadSdFontIfLoaded();
         }

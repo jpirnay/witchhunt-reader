@@ -29,6 +29,7 @@
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "network/BackgroundSyncWait.h"
 #include "network/WifiSessionEnd.h"
 #include "util/PrintfDouble.h"
 
@@ -680,20 +681,14 @@ void KOReaderSyncActivity::onEnter() {
     return;
   }
 
-#if CROSSPOINT_KOREADER_AUTOSYNC
-  if (KOReaderSyncWorker::isBusy()) {
+  background_sync::waitBeforeRadioUse("KOSync", [this] {
     {
       RenderLock lock(*this);
       state = SYNCING;
       statusMessage = tr(STR_KO_BG_SYNC_WAIT);
     }
     requestUpdateAndWait();
-    constexpr unsigned long BACKGROUND_DRAIN_TIMEOUT_MS = 10000;
-    if (!KOReaderSyncWorker::drain(BACKGROUND_DRAIN_TIMEOUT_MS)) {
-      LOG_ERR("KOSync", "Background sync job still running; proceeding anyway");
-    }
-  }
-#endif
+  });
 
   // Past this point every path uses WiFi.
   wifiActivated = true;
