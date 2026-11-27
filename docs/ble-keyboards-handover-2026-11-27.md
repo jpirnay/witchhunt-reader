@@ -164,8 +164,9 @@ sdkconfig trim (`docs/future_work/font-flash.md`, "The C3 sdkconfig trim", about
 for the flash blob. It needs the core rebuild that would also set `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY` (and auto-suspend)
 the supported way.
 
-On the S3 boards (PSRAM, flash to spare), none of this binds: the SDK's `BleKeyboardHost` on NimBLE is the shortest
-path there. Upstream puts NimBLE's host in PSRAM with a forced include (`s3_nimble_psram.h`). Not measured here.
+On the S3 boards (8 MB of PSRAM) the heap is not the binding limit, so the SDK's `BleKeyboardHost` on NimBLE is the
+shortest path there. Upstream puts NimBLE's host in PSRAM with a forced include (`s3_nimble_psram.h`). Not measured
+here, and their flash headroom was not checked.
 
 ## A keypress-only host: what it needs
 
