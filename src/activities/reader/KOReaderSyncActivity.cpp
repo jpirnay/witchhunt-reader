@@ -706,7 +706,9 @@ void KOReaderSyncActivity::onEnter() {
   //
   // Deliberately below the NO_CREDENTIALS return above: that path goes back to the reader without
   // a silent reboot, and the helper has no realloc pairing, so releasing there would leave the
-  // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
+  // reader in single-buffer mode with nothing to restore it. Every path from here reboots where the
+  // release happens (the C3s, HalCapabilities::restartsAfterWifiSession()); the PSRAM boards keep
+  // the buffer and may return to the reader in this boot.
   trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_wifi");
 

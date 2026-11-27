@@ -175,8 +175,9 @@ void DetectTimezoneActivity::onWifiSelectionComplete(bool success) {
 }
 
 // The join screen brought the radio up (station mode, a scan) before it was backed out of. That
-// is a WiFi session like any other, so onExit() restarts into Clock settings, where Back leads,
-// instead of turning the radio off and carrying on.
+// is a WiFi session like any other, so onExit() ends it: on the C3s by restarting into Clock
+// settings, where Back leads; on the PSRAM boards by turning the radio off and carrying on while
+// the heap allows (wifi_session::end()).
 void DetectTimezoneActivity::onWifiSelectionCancelled() {
   wifiWasUsed_ = true;
   finish();
