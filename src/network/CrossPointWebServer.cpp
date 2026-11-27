@@ -147,6 +147,27 @@ String lastDeleteName;
 size_t lastDeleteCount = 0;
 unsigned long lastDeleteAt = 0;
 
+// The state above outlives a server. A PSRAM board can run the next web session in the same boot
+// (wifi_session::end()), whose Calibre screen would report the last session's finished upload or deletion, and whose
+// uploads would start from a stale client number or progress. begin() and stop() start each server from nothing.
+void resetWsUploadState() {
+  if (wsUploadFile) wsUploadFile.close();
+  wsUploadFileName = String();
+  wsUploadPath = String();
+  wsUploadSize = 0;
+  wsUploadReceived = 0;
+  wsUploadStartTime = 0;
+  wsUploadInProgress = false;
+  wsUploadClientNum = 255;
+  wsLastProgressSent = 0;
+  wsLastCompleteName = String();
+  wsLastCompleteSize = 0;
+  wsLastCompleteAt = 0;
+  lastDeleteName = String();
+  lastDeleteCount = 0;
+  lastDeleteAt = 0;
+}
+
 // An upload (HTTP or WebSocket) is written to <file>.part and takes the place of <file> only once
 // it has all arrived, so one that breaks off -- Wi-Fi gone, the browser closed, Back on the device
 // -- leaves the file it would replace as it was. The file used to be removed before the first
@@ -504,6 +525,7 @@ void CrossPointWebServer::begin() {
   // Store AP mode flag for later use (e.g., in handleStatus)
   apMode = isInApMode;
   WebAssets::forget();
+  resetWsUploadState();
 
   LOG_DBG("WEB", "[MEM] Free heap before begin: %d bytes", ESP.getFreeHeap());
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
@@ -758,8 +780,8 @@ void CrossPointWebServer::stop() {
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
 
-  // Note: Static upload variables (uploadFileName, uploadPath, uploadError) are declared
-  // later in the file and will be cleared when they go out of scope or on next upload
+  // The HTTP upload state is a member and goes with this server; the WebSocket one is file-scope.
+  resetWsUploadState();
   LOG_DBG("WEB", "[MEM] Free heap final: %d bytes", ESP.getFreeHeap());
 }
 
