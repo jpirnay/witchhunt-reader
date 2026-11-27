@@ -51,6 +51,8 @@ Read the upgrade notes at the end of this section before you update.
   for it to power down after a turn: on the X3 a page's upload took 105–117 ms instead of 183.
 - **On the BOOX Picco** the first page after it starts or wakes clears the screen first, so the sleep picture leaves
   no trace (one refresh more), and the darker gray in a book's pictures is a shade lighter.
+- Fix: the BOOX Picco's touch screen could take no taps or swipes after a start.
+- Fix: as the BOOX Picco woke, its power latch and the card's power could dip for a moment.
 
 ### Settings and Wi-Fi
 
@@ -85,13 +87,16 @@ Read the upgrade notes at the end of this section before you update.
 
 ### With thanks to
 
-- **trungtypo**, whose Metalio E-Ink4 Plus port (#855) brought the reader bars' light button, the Sync tab before an
-  account, the live UI theme, the left-edge Back swipe, one-tap lists, the weather screen's fixes and quiet gestures
-  over the light panel.
+- **trungtypo**, whose Metalio E-Ink4 Plus port (#855) brought nine of these changes: the reader bars' light button,
+  the Sync tab before an account, KOReader sync without a restart, the live UI Theme and UI Font Size, the left-edge
+  Back swipe, Tap Zones + Swipe, one-tap lists, quiet gestures over the light panel and the weather screen's fixes.
 - **Justin Mitchell** and **Uri Tauber**, who brought the X4 Classic, the Sticky and the EEGO A4 to CrossPoint
-  (crosspoint-reader #3279, #2481, #3887) and the Wi-Fi power cap (#3993), and the authors of the 53 Free-Ink changes
-  this release takes in: Justin Mitchell, Julia Nguyen, kanavnet, Uri Tauber, Marco Rojas, Josh-writes, Eszter
-  Schuffert, Jadehawk, Vladislav Zbrodov, Roman Fordinal and Aaron Splady.
+  (crosspoint-reader #3279, #2481, #3887). Justin also wrote the Wi-Fi power cap (#3993) and found that the EEGO A4's
+  panel has to be powered down between screens (#4362).
+- From the 53 Free-Ink changes this release takes in: **Justin Mitchell** (the BOOX Picco's clean first page and its
+  lighter dark gray), **Julia Nguyen** (USB Drive's write checks, the Picco's touch after a start), **Roman Fordinal**
+  (the T5 S3 Pro's 1500 mAh cell) and **Eszter Schuffert** (the Picco's power on waking), with kanavnet, Uri Tauber,
+  Marco Rojas, Josh-writes, Jadehawk, Vladislav Zbrodov and Aaron Splady.
 - **mirwena** (the message that stayed, #930) and **razlack** (tighter line spacing, #931).
 
 Source-level credits remain in the relevant files.
