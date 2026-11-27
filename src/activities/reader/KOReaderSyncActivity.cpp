@@ -879,7 +879,10 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
       return;
     case KOReaderSyncPostAction::Reader:
     default:
-      activityManager.goToReader(epubPath);
+      // openBook() arms the book-open HALF. The restart this replaces on the PSRAM boards armed
+      // one too (main.cpp, BootResume::Silent); without it the page diffed FAST over the sync
+      // screen, which ghosts through (Picco, 2026-11-27: refresh=fast).
+      activityManager.openBook(epubPath);
       return;
   }
 }
