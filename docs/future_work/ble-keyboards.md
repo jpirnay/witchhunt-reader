@@ -4,8 +4,9 @@ Status: **measured on the C3 at build time for both of Espressif's controllers, 
 existing text fields is marginal, and a text editor is out of scope (`SCOPE.md`). The measurements, the reasoning and
 the instructions to repeat them are in the spike's handover:
 [`docs/ble-keyboards-handover-2026-11-27.md` on `chore/ble-c3-spike`](https://github.com/jpirnay/witchhunt-reader/blob/3b26614c1a46dfef4b95a6ff29d88b456af52c19/docs/ble-keyboards-handover-2026-11-27.md).
-That branch is a measurement spike and is never merged. Related: [font-flash.md](font-flash.md) ("The C3 sdkconfig
-trim"), which needs the same core rebuild as the supported way to the flash-only controller.
+That branch is a measurement spike and is never merged. The C3 envs now rebuild the Arduino core with the #4212 trim
+([c3-core-rebuild.md](../design/c3-core-rebuild.md): −144,756 B of flash, about +9 KB of heap on an X3), which is the
+supported way to the flash-only controller (`CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY`).
 
 ## The C3 design: decide
 
@@ -41,8 +42,8 @@ flash-only one.
 **Next step.**
 1. On the X4: the heap readings and run checks the handover lists (`CMD:BLE` on the spike, for both controllers). With
    the flash-only controller, also a page turner kept connected through flash writes, and Wi-Fi alongside it.
-2. Decide the trade: heap at every boot against flash and font-cache MMU pages (the C3 sdkconfig trim would buy flash
-   back).
+2. Decide the trade: heap at every boot against flash and font-cache MMU pages. The trim has bought back about two
+   pages; the spike's figures predate it.
 
 ## Any BLE build: gate the controller's memory at boot
 
