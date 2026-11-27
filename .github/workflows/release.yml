@@ -14,6 +14,13 @@ name: Compile Release
 # 2026-09-12 after its preflight fixes (PR #246) landed and initial on-device
 # testing came back positive.
 #
+# The exception is the experimental boards (X4 Classic, Sticky, EEGO A4,
+# 2026-11-27): published because users asked for binaries, though nobody here
+# has run them. Only a unit someone already flashed with one asks this
+# repository for its update, so the OTA reaches those who opted in. They are
+# marked experimental wherever a user picks a binary, and a failing leg does
+# not stop the release (continue-on-error on the job).
+#
 # Each leg also builds full-install-<board>.bin (scripts/full_install_image.py):
 # bootloader, partition table, otadata and the same app, written from 0x0 by
 # the web flasher. Its name must never match the OTA's firmware*.bin.
@@ -34,6 +41,7 @@ jobs:
   build-release:
     name: Build (${{ matrix.label }})
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -63,6 +71,28 @@ jobs:
             label: BOOX Picco
             asset: firmware-picco.bin
             full: full-install-picco.bin
+          # Experimental boards: published, marked experimental in the release
+          # notes, README and web flasher, but never run here. The job's
+          # continue-on-error keeps a failing leg from holding back the supported boards;
+          # its images are then missing from the release.
+          - env: x4c_gh_release
+            mcu: s3
+            label: X4 Classic (experimental)
+            asset: firmware-x4c.bin
+            full: full-install-x4c.bin
+            experimental: true
+          - env: sticky_gh_release
+            mcu: s3
+            label: Sticky (experimental)
+            asset: firmware-sticky.bin
+            full: full-install-sticky.bin
+            experimental: true
+          - env: eego_a4_gh_release
+            mcu: s3
+            label: EEGO A4 (experimental)
+            asset: firmware-eego_a4.bin
+            full: full-install-eego_a4.bin
+            experimental: true
     steps:
       - uses: actions/checkout@v6
         with:
