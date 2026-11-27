@@ -3,7 +3,7 @@
 Status: **measured on the C3 at build time for both of Espressif's controllers, not started.** A Bluetooth LE page turner serves reading; typing into the
 existing text fields is marginal, and a text editor is out of scope (`SCOPE.md`). The measurements, the reasoning and
 the instructions to repeat them are in the spike's handover:
-[`docs/ble-keyboards-handover-2026-11-27.md` on `chore/ble-c3-spike`](https://github.com/jpirnay/witchhunt-reader/blob/c6a0c6696cd611243aca26eb976f08807123bcdb/docs/ble-keyboards-handover-2026-11-27.md).
+[`docs/ble-keyboards-handover-2026-11-27.md` on `chore/ble-c3-spike`](https://github.com/jpirnay/witchhunt-reader/blob/3b26614c1a46dfef4b95a6ff29d88b456af52c19/docs/ble-keyboards-handover-2026-11-27.md).
 That branch is a measurement spike and is never merged. Related: [font-flash.md](font-flash.md) ("The C3 sdkconfig
 trim"), which needs the same core rebuild as the supported way to the flash-only controller.
 
