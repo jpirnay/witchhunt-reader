@@ -56,7 +56,7 @@ static void formatElapsed(char* buf, size_t bufSize, int32_t totalSeconds) {
 void SyncTimeActivity::onEnter() {
   Activity::onEnter();
 
-  // Before this screen joins, or turns the radio off here and in onExit(): a background push may hold it.
+  // Before this screen joins, or turns the radio off after its request: a background push may hold it.
   background_sync::waitBeforeRadioUse("CLK", [this] {
     {
       RenderLock lock(*this);
@@ -86,7 +86,9 @@ void SyncTimeActivity::onEnter() {
 
 void SyncTimeActivity::onExit() {
   Activity::onExit();
-  HalClock::wifiOff(true);
+  // The session end turns the radio off itself, and not under a busy background sync. Left by a global action while
+  // the join screen was still up (wifiWasUsed_ unset), the radio stays up for the screen change to end the session
+  // toward where it was going (ActivityManager, endWifiSessionLeftUp()).
   // Turning the radio off does not give the heap back: a torn-down session still
   // ends well below the pre-WiFi baseline. The C3s reboot, as DetectTimezoneActivity
   // does; the PSRAM boards return to Clock settings in this boot while the heap allows.

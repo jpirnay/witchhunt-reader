@@ -129,7 +129,7 @@ bool detectTimezoneSetting(uint8_t& outSetting, std::string& outIana, bool& outD
 void DetectTimezoneActivity::onEnter() {
   Activity::onEnter();
 
-  // Before this screen joins, or turns the radio off here and in onExit(): a background push may hold it.
+  // Before this screen joins, or turns the radio off after its request: a background push may hold it.
   background_sync::waitBeforeRadioUse("CLK", [this] {
     {
       RenderLock lock(*this);
@@ -165,7 +165,9 @@ void DetectTimezoneActivity::onEnter() {
 
 void DetectTimezoneActivity::onExit() {
   Activity::onExit();
-  HalClock::wifiOff();
+  // The session end turns the radio off itself, and not under a busy background sync. Left by a global action while
+  // the join screen was still up (wifiWasUsed_ unset), the radio stays up for the screen change to end the session
+  // toward where it was going (ActivityManager, endWifiSessionLeftUp()).
   // The C3s reboot; the PSRAM boards return to Clock settings in this boot while the heap allows.
   if (wifiWasUsed_ && wifi_session::end("TZ") == wifi_session::Exit::Reboot) {
     silentRestartToClockSettings();
