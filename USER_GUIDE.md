@@ -9,6 +9,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [LilyGo T5 S3 Pro](#lilygo-t5-s3-pro)
     - [Murphy M3](#murphy-m3)
     - [BOOX Picco](#boox-picco)
+    - [Experimental boards](#experimental-boards)
     - [On a touch screen](#on-a-touch-screen)
   - [1. Hardware Overview](#1-hardware-overview)
     - [Button Layout](#button-layout)
@@ -27,6 +28,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
       - [3.6.2 USB Transfer (over the cable)](#362-usb-transfer-over-the-cable)
       - [3.6.3 USB Drive (X4 Pro, LilyGo T5 S3, Murphy M3 and BOOX Picco)](#363-usb-drive-x4-pro-lilygo-t5-s3-murphy-m3-and-boox-picco)
       - [3.6.4 OPDS Catalogs](#364-opds-catalogs)
+      - [3.6.5 Leaving a Wi-Fi screen](#365-leaving-a-wi-fi-screen)
     - [3.7 Settings](#37-settings)
       - [3.7.1 Display](#371-display)
       - [3.7.2 Reader](#372-reader)
@@ -195,18 +197,36 @@ and Touch Lock can still be changed on the screen.
 A press of Power takes effect after a short pause, because the device waits to see if a second press follows.
 Single and double Power can be changed under **Settings → Controls → Button Actions**.
 
+### Experimental boards
+
+Witch Reader is also built for three boards its developers have not run it on: the **Xteink X4 Classic**, the
+**Seeed reTerminal Sticky** and the **EEGO Reader A4**. Their builds come with every release, marked experimental,
+because people asked for them. Expect rough edges: a build may not start, sleep or wake properly, so back up the
+whole flash before the first install (the [README](README.md) says how) and
+[tell us](https://github.com/jpirnay/witchhunt-reader/issues) what works. **Settings → System → System Information**
+shows **Board support: Experimental** on them.
+
+The keys, as the boards' descriptions give them (not checked on a unit):
+
+- **X4 Classic:** no touch screen and no reading light. Four keys below the screen (Back, Confirm, Left, Right), as
+  on the X4, two side keys for Up and Down, as on the X4 Pro, and Power.
+- **Sticky:** one key is both Confirm (a press) and Power (hold it to sleep); **Up** and **Down**; the touch screen
+  does the rest. It has no USB Drive.
+- **EEGO A4:** **Up**, **Down** and **Power**; the touch screen does the rest. Some units have a reading light.
+
 ### On a touch screen
 
-On the **X4 Pro**, the **LilyGo T5 S3**, the **Murphy M3** and the **BOOX Picco**, a finger does most of what the keys
-do.
+On the **X4 Pro**, the **LilyGo T5 S3**, the **Murphy M3** and the **BOOX Picco** (and the experimental Sticky and
+EEGO A4), a finger does most of what the keys do.
 
 | Where | Touch | What it does |
 | --- | --- | --- |
-| In a list | Tap a row | Highlight it. Tap it again to open it |
+| In a list | Tap a row | Open it (or, with **Tap Action** on *Select, then activate*, highlight it first) |
 | In a list | Swipe up / down | Move a page |
 | In the Library | Hold a row or cover | Open its options |
 | Anywhere | Tap a box at the edge of the screen | Press the button it names. Hold it to hold the button |
 | Anywhere | Swipe down from the top edge | Open the reading light |
+| Outside a book | Swipe in from the left edge | Back |
 | In a book | Tap the left / right side | Previous / next page |
 | In a book | Tap the middle, or the status bar | Open the reader bars |
 
@@ -485,7 +505,7 @@ Full credit to CidVonHighwind for the original protocol and tooling. While a tra
 
 ### 3.6.3 USB Drive (X4 Pro, LilyGo T5 S3, Murphy M3 and BOOX Picco)
 
-On the **Xteink X4 Pro**, the **LilyGo T5 S3**, the **Murphy M3** and the **BOOX Picco**, *File Transfer* offers **USB Drive** in place of USB Transfer. The reader appears on your computer as an ordinary USB stick, so you can copy books on and off — and reorganise folders, or clear caches — with your normal file manager. No plugin, no protocol, no WiFi.
+On the **Xteink X4 Pro**, the **LilyGo T5 S3**, the **Murphy M3** and the **BOOX Picco** (and the experimental X4 Classic and EEGO A4), *File Transfer* offers **USB Drive** in place of USB Transfer. The reader appears on your computer as an ordinary USB stick, so you can copy books on and off — and reorganise folders, or clear caches — with your normal file manager. No plugin, no protocol, no WiFi.
 
 Choose **File Transfer → USB Drive**, then connect the cable. The screen says *USB Drive Connected* once your computer has it mounted; give it up to half a minute the first time.
 
@@ -499,9 +519,18 @@ While the drive is connected the reader is a disk and nothing else — buttons, 
 
 Once at least one OPDS server is set up (see [OPDS Servers](#375-opds-servers-multiple-libraries)), **File Transfer** lists **OPDS Browser**. It connects to WiFi by itself and opens the catalog; with more than one server, you pick the server first. Books you download are saved to the **Download folder** chosen under **Settings → System → OPDS Servers** (the card's root unless you change it). How to move through a catalog is described under [Browsing a catalog](#375-opds-servers-multiple-libraries).
 
-**Back** from the server list or the top of the catalog returns to File Transfer, with **OPDS Browser** selected; hold **Back** to go Home instead. If the browser had connected to WiFi, the device restarts quietly on the way, as it does after the other WiFi modes. A catalog opened from a finished book's author search returns to Home.
+**Back** from the server list or the top of the catalog returns to File Transfer, with **OPDS Browser** selected; hold **Back** to go Home instead. If the browser had connected to WiFi, it lets go of it on the way, as every WiFi screen does (see [Leaving a Wi-Fi screen](#365-leaving-a-wi-fi-screen)). A catalog opened from a finished book's author search returns to Home.
 
-**Backing out of a WiFi join** (at the scan, while it connects, or at the network list) leaves WiFi on, so the device restarts quietly to let go of it, and comes back where you were going rather than at Home. Choose **OPDS Browser**, **USB Drive** or **USB Transfer** in File Transfer after such a join, and the restart opens that choice. **Back** from Calibre Wireless returns to File Transfer on its row, **Check for Updates** and the Font Manager return to Settings, and **Sync Time** and **Detect Timezone** to Clock Settings.
+**Backing out of a WiFi join** (at the scan, while it connects, or at the network list) leaves WiFi on; the reader lets go of it ([Leaving a Wi-Fi screen](#365-leaving-a-wi-fi-screen)) and comes back where you were going rather than at Home. Choose **OPDS Browser**, **USB Drive** or **USB Transfer** in File Transfer after such a join, and that choice opens. **Back** from Calibre Wireless returns to File Transfer on its row, **Check for Updates** and the Font Manager return to Settings, and **Sync Time** and **Detect Timezone** to Clock Settings.
+
+### 3.6.5 Leaving a Wi-Fi screen
+
+WiFi takes memory the reader needs back. On the **X3** and **X4**, leaving a screen that used WiFi (File Transfer,
+Calibre Wireless, the OPDS Browser, the Font Manager, Check for Updates, KOReader sync, Weather, Sync Time and the
+other WiFi settings) restarts the device quickly, and it comes back where you were going. The **X4 Pro**, the
+**LilyGo T5 S3**, the **Murphy M3** and the **BOOX Picco** turn WiFi off and go straight on while enough memory is
+free, and restart the same way only when it is not. Either way, a language pack, theme, font size or time zone that
+arrived during the session (from the web page, for example) is in use afterwards.
 
 ### 3.7 Settings
 
@@ -555,6 +584,9 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - "Lyra Carousel" - Lyra with a full cover carousel on the Home Screen
   - "Lyra Tiles" (default) - Lyra with a large card for the book you are reading and big labelled tiles for the screens you open most
 - **UI Font Size**: Text size for menus, headers and lists: "Normal" (default) / "Large". The reader's own status bar is not affected.
+
+  On the X4 Pro, LilyGo T5 S3, Murphy M3 and BOOX Picco a new **UI Theme** or **UI Font Size** shows at once, in
+  Settings; on the X3 and X4 it shows when you leave Settings.
 - **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it. On the BOOX Picco the slide switch can turn Dark Mode on and off instead of the light (**Slide Switch** under **[Controls](#373-controls)**). On any device a key or gesture bound to **Toggle Dark Mode** does it from any screen; under Scheduled that holds until the dark hours next start or end.
 - **Home screen** (submenu): **Layout** picks Lyra Tiles' Home: "Reader" (default), "Dashboard", "Gallery" or "Custom". The other themes use the switches below it: which entries sit on the Home screen; the rest move behind **More**. The switches are hidden while the theme is Lyra Tiles, which does not use them. See **[Home Screen](#31-home-screen)**.
 - **Show Busy Indicator**: Shows a small hourglass in the middle of the screen when a button press starts a screen change that takes a second or more, such as opening or leaving a book, so you can tell the press was received. It only appears on devices whose screen refreshes fast enough for it to help, so never on the LilyGo T5 S3. "ON" (default) / "OFF".
@@ -569,7 +601,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Font Family**: Font used for EPUB reading. Includes built-in fonts (Serif, made from Adobe's Source Serif 4, and Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. To add a TrueType or OpenType font of your own, use **Upload a font** in the web interface's Font Manager (see the [Web Interface Guide](./docs/webserver.md#8-font-manager)): the reader draws it at every size. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
 - **Font Size**: For Serif and Noto Sans, 10pt to 26pt: 10pt to 18pt are typefaces designed at that size; 20, 22, 24 and 26pt are the 18pt face enlarged. For a font on the SD card, the sizes its files were built at (the number in each file name: `MyFont_8.cpfont` is 8pt), then the standard sizes above its largest file, drawn from that file enlarged. A size the selected font does not offer, such as 8pt after switching from an SD font to Serif, is shown and drawn as the nearest size it does offer, and comes back when you switch back.
 - **Normalize Font Size**: Shows text the book sets only slightly larger or smaller than its body text (within 10%) at your font size. It also treats the size of the book's running text as your font size, so a book that shrinks or enlarges all its text reads at your size, with headings and small print in proportion. That size is measured from the first chapter laid out with enough text; a book whose size differs is laid out once more at that moment, keeping your place. It needs **Embedded Style** on. "ON" (default) / "OFF"
-- **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB), the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below), the two Arabic ones (NotoNaskhArabic and NotoSansArabic), the two Hebrew ones (NotoSansHebrew and NotoSerifHebrew) and the two Myanmar ones (NotoSansMyanmar and NotoSerifMyanmar), 34 families in all: install your language's from its own row. Download All leaves out the **[language packs](#language-packs)** too: the interface packs (ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI), which draw book titles in those scripts outside a book, the **Language-** rows after the fonts, one per interface language (10–15 KB), and the **Hyphenation-** rows at the end of the list, one per language (0.2–206 KB): install your interface language's and the ones for your books from their rows. Deleting a hyphenation pack stops hyphenating that language's books. A CJK family is one file (Regular only) and an Indic, Arabic, Hebrew or Myanmar family a Regular and a Bold file, each drawn at every size. The reader restarts when you leave the Font Manager.
+- **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB), the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below), the two Arabic ones (NotoNaskhArabic and NotoSansArabic), the two Hebrew ones (NotoSansHebrew and NotoSerifHebrew) and the two Myanmar ones (NotoSansMyanmar and NotoSerifMyanmar), 34 families in all: install your language's from its own row. Download All leaves out the **[language packs](#language-packs)** too: the interface packs (ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI), which draw book titles in those scripts outside a book, the **Language-** rows after the fonts, one per interface language (10–15 KB), and the **Hyphenation-** rows at the end of the list, one per language (0.2–206 KB): install your interface language's and the ones for your books from their rows. Deleting a hyphenation pack stops hyphenating that language's books. A CJK family is one file (Regular only) and an Indic, Arabic, Hebrew or Myanmar family a Regular and a Bold file, each drawn at every size. Leaving the Font Manager ends its WiFi as described under [Leaving a Wi-Fi screen](#365-leaving-a-wi-fi-screen).
 - **Text Anti-Aliasing**: Smooth grey edges on text. They appear just after a page does, and are skipped while you flip through pages quickly. "ON" / "OFF"
 - **One-Pass Anti-Aliasing** *(X3, X4 with an SSD1677 panel, X4 Pro with a UC8179 panel, Murphy M3, BOOX Picco)*: Draws a text page and its grey edges in one refresh, so there is no second flicker when the grey arrives, and the edges stay on while you flip through pages quickly. The edges use one grey level instead of two, and pages with images keep the usual two steps, unless **Images** is "Black & White". It is one setting for the whole device, with no per-book override. "ON" / "OFF" (default).
 - **Text Darkness**: Ink density for rendered text: "Normal" (default), "Dark", "Extra Dark", "Max Dark"
@@ -618,8 +650,8 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
 - **Touch Lock** *(touch devices only)*: Touch off everywhere, books included: page turns, the reader bars, gestures and the light panel. Read and navigate by the keys alone, with a hand resting on the glass. The keys keep working, the Home key of the X4 Pro and the LilyGo T5 S3 among them, and touching the glass does not keep the device awake. Switch it off here, with a key bound to **Toggle Touch Lock**, or on the BOOX Picco with the slide switch set to "Touch". The BOOX Picco reaches this row by the keys only through a key bound to **Confirm** (a press of Power, unless you change it), so there Touch Lock stays off while nothing but touch could switch it off again: no key bound to Confirm or to **Toggle Touch Lock**, and the slide switch not set to "Touch". Taking the last of these away switches it off. "OFF" (default) / "ON".
 - **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. The light panel pulled down over a book counts as the book and keeps touch. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
-- **Touch Page Turn** *(touch devices only)*: How the reading page turns pages by touch — "Off", "Tap Zones", "Swipe", "Tap Zones (Inverted)". It governs page turns only; the reader menu and the reading light stay reachable either way.
-- **Tap Action** *(touch devices only)*: Whether tapping a list row selects it — "Select, then activate" (default) — or opens it straight away, "Activate immediately".
+- **Touch Page Turn** *(touch devices only)*: How the reading page turns pages by touch — "Off", "Tap Zones", "Swipe", "Tap Zones (Inverted)", "Tap Zones + Swipe". It governs page turns only; the reader menu and the reading light stay reachable either way.
+- **Tap Action** *(touch devices only)*: Whether tapping a list row opens it straight away — "Activate immediately" (default) — or first selects it, "Select, then activate". A reader set up before 2.55 keeps the choice it had saved.
 - **Gesture actions** *(touch devices only)*: One entry per gesture — the sideways swipes, the four edge swipes (left and right edge columns, up and down), the two ten-page zone swipes, the five tap zones, the same five as long taps, the four corner holds, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Touch Controls](#5-touch-controls)**.
 - **Gesture overview** *(touch devices only)*: A read-only screen drawing the tap, hold and swipe zones with your current assignments in them. Generated from live settings, so it is the authority if the documentation disagrees.
 - **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode", "Nothing" or "Touch" (off is **Touch Lock**). Its position counts at start-up and each time it moves; in between, the light, Dark Mode and Touch Lock can still be changed on the screen.
@@ -645,7 +677,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
   - **Book view**: How the Library's [Books](#33-library-screen) tab shows books. "Filenames" / "Details" / "Covers"
 
 **Network**:
-- **WiFi Networks**: Add, remove, and connect to WiFi networks. If WiFi was switched on here, leaving the screen restarts the device quickly and returns to Settings. That frees the memory WiFi used; every screen that uses WiFi does the same.
+- **WiFi Networks**: Add, remove, and connect to WiFi networks. If WiFi was switched on here, leaving the screen returns to Settings (after a quick restart on the X3 and X4, see [Leaving a Wi-Fi screen](#365-leaving-a-wi-fi-screen)).
   - Whenever the reader needs WiFi, it first tries the network it last connected to, then any other saved network in range, strongest first. While it does, **Back** cancels and **Confirm** stops it and shows the network list.
   - To join a network that does not broadcast its name, choose **Add hidden network...** at the end of the list and type its name (SSID). A password saved for that name is reused; otherwise you are asked for one (leave it empty for an open network). While it connects, **Back** abandons the attempt and returns to the list.
 - **KOReader Sync**: Configure and authenticate KOReader progress sync. See [KOReader Sync Quick Setup](#377-koreader-sync-quick-setup).
@@ -658,18 +690,18 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
   - **First Day of Week**: The day the calendar and the week's reading on the Home screen start on. "Monday" (default) / "Sunday" / "Saturday"
   - **Timezone**: Pick your timezone from a full-screen list of 86: named places and regions that follow their own daylight-saving rules, fixed UTC offsets for anywhere the list misses, and plain UTC.
   - **Detect Timezone**: Auto-detect timezone via IP geolocation (requires WiFi).
-  - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards the device restarts quickly and returns to Clock Settings, like every other screen that uses WiFi.
+  - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards it returns to Clock Settings, after a quick restart on the X3 and X4, like every other screen that uses WiFi.
 - **Weather Settings**: Configure the Open-Meteo weather panel shown on the Home Screen and the [Weather screen](#39-weather-screen). **Location** searches for a city: pick one of the matches with **Confirm**, or press **Back** to keep the current location. A search with no matches says so instead of returning silently.
 - **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like the Library's [Books](#33-library-screen) tab: **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set Sleep**, which makes the image your sleep screen. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
 
 **System**:
 - **Clear Reading Cache**: Clear every book's cache on the SD card: its index, laid-out chapters, images and covers, which the reader builds again the next time the book is opened. It asks **Keep bookmarks and reading progress?** **Keep** leaves each book's reading position, bookmarks, link **Back** history and its own settings (those set with **This book only** or in the reader menu), so a book opens again where you left it, as you left it. **Reset** deletes those too, and the books' entries leave **Bookmarks**. **Cancel** (or **Back**) clears nothing. **Delete Book Cache**, in the Library's options and in the reader menu, does the same for one book and asks the same question.
 - **Repair Screen**: Clears ghosting left behind by fast page refreshes, by driving every pixel hard between black and white several times. Takes about 20 seconds and deletes nothing. A maintenance action, not a fix for ghosting while you read.
-- **System Information**: Display device info (firmware version, hardware, memory, SD card). When it runs to more than one page, the header shows the page ("1 / 2") and the page buttons move between pages, wrapping round at the ends. How many pages there are depends on the orientation.
+- **System Information**: Display device info (firmware version, hardware, memory, SD card; on an [experimental board](#experimental-boards), **Board support: Experimental**). When it runs to more than one page, the header shows the page ("1 / 2") and the page buttons move between pages, wrapping round at the ends. How many pages there are depends on the orientation.
 - **Reading Statistics**: View reading stats (streaks, time read, pages/min, per-book ETA, sparkline history). Also on the Home screen as **Reading Stats**. To forget one book, open it under **All books** and press **Confirm** (**Remove**); its reading time comes out of the totals and the book file itself is untouched. Not offered for the book you currently have open. The web dashboard's **Stats** page has the same **Remove from stats** button in each book's expanded row.
 
 **Firmware Update**:
-- **Check for Updates**: Check for and download Witch Reader firmware updates over WiFi. When a newer release is found, the question to update shows the release's title and the first few lines of its release notes, so you can see what it brings before you install it. The download is always checked against the certificate of GitHub's servers (**Skip HTTPS validation** does not apply), and the firmware against the SHA-256 checksum the release lists, before the reader switches to it. When the firmware is up to date, or you decline its update, the same screen goes on to the [language and hyphenation packs](#language-packs) on the card: a line under the versions says they are up to date, or how many have an update, and then asks whether to update them now. **Update** installs them in the Font Manager, which restarts the reader into Settings when you leave it. A pack has an update when its size or its checksum differs from the Font Manager's list, so the interface language pack the reader wrote to the card on its first start after 2.40 or 2.41RC is offered as an update too. The reader restarts when you leave this screen.
+- **Check for Updates**: Check for and download Witch Reader firmware updates over WiFi. When a newer release is found, the question to update shows the release's title and the first few lines of its release notes, so you can see what it brings before you install it. The download is always checked against the certificate of GitHub's servers (**Skip HTTPS validation** does not apply), and the firmware against the SHA-256 checksum the release lists, before the reader switches to it. When the firmware is up to date, or you decline its update, the same screen goes on to the [language and hyphenation packs](#language-packs) on the card: a line under the versions says they are up to date, or how many have an update, and then asks whether to update them now. **Update** installs them in the Font Manager, which returns to Settings when you leave it. A pack has an update when its size or its checksum differs from the Font Manager's list, so the interface language pack the reader wrote to the card on its first start after 2.40 or 2.41RC is offered as an update too. Leaving this screen ends its WiFi as described under [Leaving a Wi-Fi screen](#365-leaving-a-wi-fi-screen); after a firmware update the reader restarts into it.
 - **Include Beta Updates**: Whether to include release-candidate builds in update checks. "ON" / "OFF"
 - **SD Firmware Update**: Flash a firmware `.bin` file from the SD card. Press **Confirm** on a file to flash it. The **Options** button hint in the file picker opens a smaller menu than the Library's: the sort and visibility options, **Search**, **Search all folders**, and **Remove** to delete a `.bin` you no longer need. Use the release's `firmware*.bin` here, not a `full-install-*.bin`.
 
@@ -797,6 +829,8 @@ the first two of these. All three are in the reader menu's **Sync** tab (**Confi
 - **Push progress from this device** — send the current position to the server.
 - **Compare progress with other devices** — show which side is further on and let you choose. A long **Confirm** while reading does the same.
 
+On the X4 Pro, LilyGo T5 S3, Murphy M3 and BOOX Picco the **Sync** tab is there before an account is set up: its one row, **KOReader Sync**, opens the KOReader settings over the book, and with an account entered the tab offers the three rows above.
+
 A synced position lands on the exact page, in both directions, when the page starts in text, and which side is further is decided by chapter and paragraph rather than by percentage. To fetch your progress before a book opens, hold **Confirm** on it in the Library, or choose **Fetch Progress & Open** in its options menu.
 
 ##### Automatic sync
@@ -873,7 +907,7 @@ If the picked image cannot be shown, for example a damaged PNG, the next one in 
 - **The next 24 hours**: the temperature as a line (scale on the left) over the chance of rain as bars (0–100 %, scale on the right). A line marks midnight.
 - **Updated**: when the forecast was fetched. Every time on this screen is the place's own, so it differs from the device's clock when the place is in another time zone.
 
-**Back** returns to Home, **Confirm** opens Weather Settings, and **Left** or **Right** fetches a new forecast.
+**Back** returns to Home, **Confirm** opens Weather Settings, and **Left** or **Right** fetches a new forecast. With no place set the screen says **No location set for weather**, and **Confirm** opens Weather Settings to pick one.
 
 The screen opens on the last forecast fetched. It connects to WiFi for a new one when that forecast is 30 minutes old or more, or when the device cannot be sure of its age: that takes the time from a clock chip, or from the network since the device last started (waking from sleep is a start). The Xteink X4 has no clock chip, so after a sleep or a restart it fetches every time.
 
@@ -912,7 +946,7 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 * **Leave the book:** Press **Back** to close the book and return to where you opened it: the **[Home](#31-home-screen)** screen, or the **[Library](#33-library-screen)** at the tab, the folder or author, and the row you opened it from. Holding **Back** does the same, unless you give the long press an action of its own under **[Controls](#373-controls)**.
 * **Footnotes:** A tap on a note's mark (a number, `*`, `†`), the footnote button when the page has one link, or a note picked in **Footnotes** opens the note in a sheet over the page, in the book's font: along the bottom when the mark is in the upper half of the page, along the top when it is in the lower half, and never over the line that holds the mark, so the sentence that calls the note stays in view. The sheet's title names the note and, on a page with several, where it stands among them ("Note 2 · 2 of 3"). A note longer than half the screen has pages. The page keys (on a touch screen, a tap on either half of the note) turn them, go on past a note's last page to the page's next note and back past its first page to the previous one, and close the sheet past the page's last note or before its first. **Go to note** (**Confirm**) shows the note where it stands in the book; **Back**, or a tap on the page, closes the sheet. A long note is cut after about 4 KB, with "..." where it stops: **Go to note** shows the rest. A link that is not a note, such as a contents entry or a cross-reference, is followed as before, and so is a note whose text cannot be read.
 * **Back after a link:** After you follow a link in the book, such as a footnote, **Back** first returns to the page you followed it from, step by step for the last three links. These steps are kept when the device sleeps or you close the book there.
-* **Reader bars:** Press **Confirm** (on a touch screen: tap the middle of the page or the status bar) for two bars over the page, which stays in view between them. The top one leaves the book (**<**), shows the book's details (a tap on its title) and adds or removes a **[bookmark](#bookmarks)** on the page (the star, filled while the page has one). The bottom one has five tabs, an icon each:
+* **Reader bars:** Press **Confirm** (on a touch screen: tap the middle of the page or the status bar) for two bars over the page, which stays in view between them. The top one leaves the book (**<**), shows the book's details (a tap on its title) and adds or removes a **[bookmark](#bookmarks)** on the page (the star, filled while the page has one). On a device with a reading light (X4 Pro, LilyGo T5 S3, BOOX Picco) a sun beside the star opens the light panel. The bottom one has five tabs, an icon each:
   - **Navigation** (a list): **Select Chapter** opens the **[Table of Contents](#6-chapter-selection-screen)**, **Bookmarks** the pages you bookmarked, **Go to printed page** a page of the book's print edition (where the book numbers them), **Search** searches the book (**[below](#searching-the-book)**), and **Go Home** closes the book.
   - **Progress** (a dial): how far you are in the book and in the chapter and the time you have spent in the book, with buttons for the previous chapter, **Go to %** and the next chapter. With **[KOReader Sync](#377-koreader-sync-quick-setup)** set up, **Pull** fetches your position from the server and **Push** sends it there. On the Murphy held sideways there is no room for them; the reader menu's **Sync** tab has both.
   - **Layout** (**Aa**): below.
@@ -996,7 +1030,7 @@ the firmware keeps its room for everything else. A pack you do not install costs
 * **Getting a pack.** Picking a language under **Language** (Settings → System) whose pack is not on the card asks
   whether to download it, in one question with the language's hyphenation pack (or, for Chinese, Japanese and Korean, its
   interface pack) when that is missing too. **Download** connects to Wi-Fi and installs it in the Font Manager; leaving
-  the Font Manager restarts the reader in the new language. Until the pack is there, the interface stays in English.
+  the Font Manager puts the new language in use (on the X3 and X4 through a quick restart). Until the pack is there, the interface stays in English.
   The Home screen asks once after a start when the card lacks the pack of the language you set; **No** is remembered
   there, and picking the language again asks again.
 * **Without Wi-Fi**, copy the pack to `/.crosspoint/lang/` on the card and restart: `de.cplang` for German, as named in
@@ -1121,11 +1155,11 @@ Neither can strand you:
 Outside a book, **taps belong to whatever is on screen** — a row, a cover, a keyboard key,
 a button hint. Only swipes and corner holds are treated as gestures there.
 
-**Lists use point-then-confirm.** The first tap on a row *moves the highlight* to it and
-stops. A second tap on the row that is already highlighted *opens* it. A mis-tap therefore
-costs one more tap instead of an action to undo, and on e-paper the highlight moving is
-the only feedback there is. If you would rather a row opened on the first tap, set
-**Settings → Controls → Tap Action** to *Activate immediately*.
+**One tap opens a row.** A tap on a list row opens it, as on a phone. If you would rather
+a mis-tap cost one more tap than an action to undo, set **Settings → Controls → Tap Action**
+to *Select, then activate*: the first tap then *moves the highlight* to the row and stops,
+and a second tap on the highlighted row opens it. A reader set up before 2.55 keeps the
+choice it had saved.
 
 **Tabs are a single tap.** Tapping Display / Reader / Controls / System in Settings,
 Navigation / Settings / Sync / Tools in the reader menu, or Books / Recent / New / Authors in
@@ -1142,7 +1176,7 @@ a computer) also show an **Exit** button below their status on a touch screen. I
 
 | Gesture | What it does |
 | --- | --- |
-| Tap a row, cover, folder or button hint | Select it; tap again to open it |
+| Tap a row, cover, folder or button hint | Open it (with *Select, then activate*: select it; tap again to open it) |
 | Hold a button hint | The same as holding that button |
 | Swipe up / down over a list | Page the list (on both Bookmarks lists and Wi-Fi networks, a swipe does nothing for now) |
 | Swipe **right from the left edge** | Back |
@@ -1189,6 +1223,7 @@ height; the middle column is split into three.
 | **Tap Zones** *(default)* | Tap the left third for the previous page, the right third for the next |
 | **Tap Zones (Inverted)** | The same, mirrored |
 | **Swipe** | Horizontal swipes turn pages; the taps stay free |
+| **Tap Zones + Swipe** | Both: the outer-third taps and horizontal swipes turn pages, one page per touch |
 | **Off** | The page ignores touch for page turns |
 
 A tap on the status bar, at the top or the bottom of the page wherever it is shown, opens the reader bars
@@ -1226,7 +1261,7 @@ about 60 px of travel to count as a swipe rather than a tap.
 | Swipe up / down in the **right edge** column | Light warmer / cooler |
 | Swipe **left** inside the left (back) column | Skip 10 pages back |
 | Swipe **right** inside the right (forward) column | Skip 10 pages forward |
-| Swipe left / right elsewhere | Next / Previous page *(in Swipe mode only)* |
+| Swipe left / right elsewhere | Next / Previous page *(in the Swipe and Tap Zones + Swipe modes)* |
 
 In a book whose pages turn right to left, the page swipes mirror (a swipe towards the right shows the next page) and, with **Page Turn Buttons** on "Follow Book", so do the two ten-page swipes: the swipe inside the left column skips 10 pages forward. The other gestures, including the holds that skip a chapter, are not mirrored.
 
