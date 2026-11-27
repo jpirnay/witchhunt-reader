@@ -54,8 +54,9 @@ Rules:
   that lost power comes back at TI's 3000 mAh default and learns a full-charge capacity against it.
   `HalPowerManager::serviceGaugeCapacityLoad()`, called once per loop pass from `main.cpp`, drives
   the SDK's load (`BatteryMonitor::loadDesignCapacity()`) one short step at a time over about 8 s,
-  holding `HalI2cBus::Lock` for each step. The SDK writes only when the gauge needs it. Only the X3
-  profiles set `designCapacityMah` (650 mAh), so every other board returns on the first call.
+  holding `HalI2cBus::Lock` for each step. The SDK writes only when the gauge needs it. The X3
+  profiles set `designCapacityMah` (650 mAh) and the LilyGo T5S3 its 1500 mAh cell (Free-Ink 1e2823a,
+  from the 2026-11-27 resync); every other board returns on the first call.
 - An IMU reads through the SDK's `freeink::Imu` (`HalTiltSensor`), which applies the profile's mount correction
   (`imuSwapXY`, `imuFlipX`, `imuFlipY`). Tilt page turns (`lib/hal/TiltRate.h`) and auto-rotate
   (`lib/hal/OrientationTracker.h`) take its axes in the panel's native frame: X along the long side toward native +x,

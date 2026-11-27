@@ -541,7 +541,15 @@ gray-level plan) is in [grayscale-aa-rendering.md](../grayscale-aa-rendering.md#
 
 ## For the next SDK resync
 
-Two open Free-Ink PRs would break this firmware silently if they land as they are:
+Two open Free-Ink PRs would break this firmware silently if they land as they are. Both were still open at the
+2026-11-27 resync, which brought neither: the reTerminal E1001 came in through another commit (5a38a50), without
+#80's `PanelDriver` change.
+
+A third case of the same kind came in with that resync: `Ssd1677Config::initialHalfRefresh` sits before
+`readerFastLut`, `textAaLut` and the Picco flags. No positional initialiser reaches that far today (the Metalio's,
+the longest, stops at `fastLut`), and the later fields are set by name. A new positional one must count past it.
+
+The two PRs:
 
 - **Free-Ink #196** (Murphy M4) inserts `windowRefreshUsesHalfTemp` mid-way into `Ssd1677Config`
   (`Ssd1677Driver.h`): a positional initialiser of ours that the PR does not edit would shift by one field without an
