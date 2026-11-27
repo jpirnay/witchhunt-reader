@@ -135,7 +135,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-${{ hashFiles('platformio.ini') }}
+          key: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-${{ hashFiles('platformio.ini', 'scripts/patch_pioarduino_cache.py') }}
           restore-keys: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-
 
       - name: Pin pioarduino core inside the platform penv
