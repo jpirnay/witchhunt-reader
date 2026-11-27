@@ -2688,7 +2688,7 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
 
   // A pack's file goes to its folder, not into a family folder, as the Font Manager installs it: a hyphenation pack's
   // to /.crosspoint/hyphenation/, and on the X3 and X4 into the flash store there and then; a UI language pack's to
-  // /.crosspoint/lang/, read at the next start.
+  // /.crosspoint/lang/, read when the session ends (ServerSession::end(), or the restart that ends it).
   if (families.pack(familyIndex)) {
     if (!FontInstaller::installStagedPack(families, familyIndex, stagingDir)) {
       outError = "Failed to finalize the pack";

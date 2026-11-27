@@ -2,6 +2,7 @@
 
 #include <DNSServer.h>
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <I18n.h>
 #include <WiFi.h>
 
@@ -80,7 +81,8 @@ void CrossPointWebServerActivity::onExit() {
 
   state = WebServerActivityState::SHUTTING_DOWN;
   stopDnsServer();
-  // Every way out of File Transfer's own screens leads Home.
+  // Every way out of File Transfer's own screens leads Home: by the restart, or by the navigation
+  // already queued where the session carries on.
   session.end(silentRestart);
 }
 
@@ -101,14 +103,17 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
         std::make_unique<CalibreConnectActivity>(renderer, mappedInput), [this](const ActivityResult& result) {
           state = WebServerActivityState::MODE_SELECTION;
 
-          startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult& result) {
-                                   if (result.isCancelled) {
-                                     onGoHome();
-                                   } else {
-                                     onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
-                                   }
-                                 });
+          // On its Calibre Wireless row, where the restart after a session lands too
+          // (silentRestartToFileTransferCalibre()): Back leaves Calibre Wireless for this list.
+          startActivityForResult(
+              std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput, NetworkMode::CONNECT_CALIBRE),
+              [this](const ActivityResult& result) {
+                if (result.isCancelled) {
+                  onGoHome();
+                } else {
+                  onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+                }
+              });
         });
     return;
   }
@@ -247,12 +252,15 @@ void CrossPointWebServerActivity::showServerScreenAndReleaseBuffers() {
   LOG_DBG("WEBACT", "Free heap before frame buffer release: %d bytes", ESP.getFreeHeap());
   renderer.clearScreen();
   renderServerRunning();
-  // Painted here rather than in render(), and render() ships nothing once the buffers are gone, so
-  // this frame stays up for the whole session with nothing to clean it later.
+  // Painted here rather than in render(), and render() ships nothing from here on, so this frame
+  // stays up for the whole session with nothing to clean it later.
   activityManager.armGhostClearingRefresh();
   renderer.displayBuffer();
   buffersReleased = true;
-  renderer.releaseFrameBuffers();
+  // Only where the session ends in a restart, which allocates them again. The PSRAM boards keep the
+  // buffers anyway (HalDisplay::releaseBuffers() refuses there), and the release would still null
+  // the renderer's pointer, leaving the screen the session carries on to nothing to draw into.
+  if (HalCapabilities::restartsAfterWifiSession()) renderer.releaseFrameBuffers();
   LOG_DBG("WEBACT", "Free heap after frame buffer release: %d bytes", ESP.getFreeHeap());
 }
 
@@ -280,7 +288,7 @@ void CrossPointWebServerActivity::loop() {
   // SHUTTING_DOWN, which loop() ignores -- Back included -- and render() cannot paint with the
   // buffers released, so the device sat on a dead File Transfer screen until it was switched off.
   // Now the server and Back keep working while the driver reconnects, and a link still gone after
-  // the grace period ends the session as Back does: restart to Home. The screen cannot be
+  // the grace period ends the session as Back does, to Home. The screen cannot be
   // repainted to show the loss, nor a new address if the link comes back on one; the log has both.
   //
   // RSSI indicator update intentionally removed: the 640ms e-ink refresh every 5 seconds blocked

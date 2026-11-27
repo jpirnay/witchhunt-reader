@@ -19,9 +19,9 @@ class GfxRenderer;
 // and a password grant's token refresh on 401/403 (no event plugin in the Plugin Hub uses one).
 namespace plugin_events {
 
-// Reads every enabled plugin's device.json "events" section into the subscription table, at boot. Plugins are installed
-// over File Transfer, whose end restarts the reader (ServerSession::end), so a new plugin subscribes from then on.
-// Allocates nothing when no plugin subscribes.
+// Reads every enabled plugin's device.json "events" section into the subscription table, at boot and again when a web
+// session ends without a restart (ServerSession::end): plugins are installed, enabled and disabled over File Transfer,
+// so a new plugin subscribes from then on. Allocates nothing when no plugin subscribes.
 void refreshSubscriptions();
 
 // True when an enabled plugin subscribes to `e`: a table lookup, no I/O.

@@ -10,13 +10,45 @@
 
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
+#include "UiFontScale.h"
+#include "UiLanguage.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "components/TouchExitButton.h"
+#include "network/WifiSessionEnd.h"
+#include "util/PluginEvents.h"
+#include "util/Timezones.h"
+
+namespace {
+
+// What the restart after a session used to read again, and a session can change: the web page and the serial SET store
+// the UI theme, the UI font size and the timezone without applying them (the device's Settings and Clock screens
+// apply them), and an upload can add, replace or delete the UI language's pack, a plugin with events, or a family in a
+// fonts folder (whose names the settings rows keep until discover()). Every other setting either path writes is read
+// where it is used. After every session, changed or not: each is a card read or two. Under the exclusive render lock
+// onExit() runs in, as UITheme::reload() and the language's strings need; the stack below a web session holds no
+// strings or theme of its own (File Transfer opens by replace, Calibre Wireless only over it).
+void applyWhatTheSessionChanged([[maybe_unused]] const char* tag) {
+  [[maybe_unused]] const unsigned long t0 = millis();
+  UiLanguage::reload();
+  [[maybe_unused]] const unsigned long t1 = millis();
+  applyUiLook();
+  timezones::applyToClock();
+  [[maybe_unused]] const unsigned long t2 = millis();
+  plugin_events::refreshSubscriptions();
+  [[maybe_unused]] const unsigned long t3 = millis();
+  if (sdFontSystem.ready()) sdFontSystem.registry().discover();
+  [[maybe_unused]] const unsigned long t4 = millis();
+  LOG_INF(tag,
+          "Read again after the session: language %lu ms, UI look and timezone %lu ms, plugins %lu ms, fonts %lu ms",
+          t1 - t0, t2 - t1, t3 - t2, t4 - t3);
+}
+
+}  // namespace
 
 void ServerSession::prepareRadio() {
   // A loaded SD font (Literata etc.) holds ~24-60KB of kern/ligature/glyph data that is
-  // completely unused during a web server session. The device restarts when the session ends
-  // (end()), so it is reloaded fresh on the next boot anyway. Then the secondary framebuffer and
+  // completely unused during a web server session. The next book open loads it again
+  // (ensureLoaded()), after the restart end() makes or in the same boot. Then the secondary framebuffer and
   // the glyph cache, as for every network activity; WifiSelectionActivity trims too, and the
   // hotspot never goes through it.
   LOG_DBG(tag, "Free heap before trim: %d bytes", ESP.getFreeHeap());
@@ -103,13 +135,12 @@ void ServerSession::end(void (*const restart)()) {
   MDNS.end();
 
   // Nothing to undo when WiFi never came up (the user backed out of the mode or network choice).
-  const wifi_mode_t mode = WiFi.getMode();
-  if (mode == WIFI_MODE_NULL) return;
-  if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
-    WiFi.softAPdisconnect(true);
-  } else {
-    WiFi.disconnect(false);
+  if (WiFi.getMode() == WIFI_MODE_NULL) return;
+  // The radio off, the hotspot's included. Where the step says reboot (the C3s every time), restart() does not return,
+  // unless a deep sleep supersedes it and turns the radio off itself.
+  if (wifi_session::end(tag) == wifi_session::Exit::Reboot) {
+    restart();
+    return;
   }
-  delay(30);
-  restart();
+  applyWhatTheSessionChanged(tag);
 }

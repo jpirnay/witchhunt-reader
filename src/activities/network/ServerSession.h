@@ -17,8 +17,8 @@ class MappedInputManager;
 //   start()         once the network is up: mDNS, the server, Back during an upload, the link watch
 //   serve()         every loop: requests, Back and the touch Exit button
 //   link()          joined networks: whether the link is up, reconnecting, or gone
-//   end()           from onExit(): everything down, then the restart every network session ends in,
-//                   into where the screen was left for
+//   end()           from onExit(): everything down, then the restart into where the screen was left
+//                   for, or, where the heap allows (wifi_session::end()), this boot carries on
 class ServerSession {
  public:
   // The name the reader answers to on the network: http://crosspoint.local/.
@@ -49,9 +49,13 @@ class ServerSession {
   bool running() const { return server && server->isRunning(); }
   CrossPointWebServer* webServer() const { return server.get(); }
 
-  // Stops the server, mDNS and the link watch. If WiFi was brought up, disconnects it and calls
-  // `restart`, a silentRestart*() that does not return: the restart lands where the screen was left
-  // for. Anything of the caller's own on the network (the hotspot's DNS server) goes before this.
+  // Stops the server, mDNS and the link watch. If WiFi was brought up, ends the session
+  // (wifi_session::end(): the radio off) and either calls `restart`, a silentRestart*() that does
+  // not return and lands where the screen was left for, or, on a board that carries on, reads
+  // again what the restart would have (the UI look and language, the timezone, the plugins, the
+  // font families) and returns: the navigation the screen queued runs in this boot. Must be called
+  // from onExit(), under its exclusive render lock. Anything of the caller's own on the network
+  // (the hotspot's DNS server) goes before this.
   void end(void (*restart)());
 
  private:
