@@ -270,19 +270,19 @@ Could the C3s carry on too? A throwaway build (`spike/c3-wifi-carry-on`, master 
 the secondary framebuffer back at every session end (`reallocSecondaryBuffer()`, 52,272 B on the X3), carried on
 when that worked and restarted when it did not. Internal free / largest block at the session end:
 
-- **The buffer mostly cannot come back.** In 8 of 14 session ends the largest block was 27,636-45,044 B, short of
+- **The buffer mostly cannot come back.** In 7 of 14 session ends the largest block was 27,636-45,044 B, short of
   the buffer, and the re-allocation failed: the first KOReader sync from Home, Sync Time, Weather, Wi-Fi Networks,
   the account check, the Font Manager. The long-lived blocks a session leaves land inside the 52 KB the trim freed.
-- **When it does, too little is left for Wi-Fi.** Five carried on (from 53-65 KB in one block) and kept 54,644-60,856
-  free with a largest block of 14,324-25,588 B. The third KOReader sync in such a boot was refused: `Insufficient
-  contiguous heap for TLS: 22516 available, 26624 required`. A Sync Time carried on into Clock settings at 21,176 /
-  6,644.
+- **When it does, too little is left for Wi-Fi.** Six carried on (from 53-65 KB in one block). Five kept
+  54,644-60,856 free with a largest block of 14,324-25,588 B, and the third KOReader sync in such a boot was refused:
+  `Insufficient contiguous heap for TLS: 22516 available, 26624 required`. The sixth, a Sync Time, carried on into
+  Clock settings at 21,176 / 6,644. File Transfer, the fourteenth, restarts regardless.
 - **The reader held up after a carry-on**: ten pages with a chapter crossing, a second book with pictures, eight
   section builds with `failedAlloc=0`, anti-aliasing on, at 44-45 KB free and a 22,516 B largest block (38,900 B in
   the same book after a restart).
 - **The S3 minimums are no rule for a C3.** They said carry on at every failed re-allocation (free reads high with
   the buffer out) and restart at every successful one.
-- File Transfer restarts regardless: it releases both framebuffers.
+- File Transfer releases both framebuffers, so it restarts on a C3 in any case.
 
 So the C3s keep restarting after every Wi-Fi session (`HalCapabilities::restartsAfterWifiSession()`). Not tried:
 carrying on without the secondary buffer, which leaves the reader without anti-aliasing, the next-page pre-render
