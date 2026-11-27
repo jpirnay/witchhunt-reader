@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr uint8_t kSteps = kLineSpacingPercentSteps;  // 90% to 175%; Book's style is tested on its own
+constexpr uint8_t kSteps = kLineSpacingPercentSteps;  // 80% to 175%; Book's style is tested on its own
 
 uint8_t step(const LineSpacingStep s) { return static_cast<uint8_t>(s); }
 
@@ -20,7 +20,7 @@ int pitch(const int lineHeight, const TextScale compression) { return compressio
 float asFloat(const TextScale s) { return static_cast<float>(s.raw()) / TextScale::kOne; }
 
 TEST(LineSpacing, FontFactorsAreTheStepsPercentages) {
-  const float expected[kSteps] = {0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.3f, 1.45f, 1.6f, 1.75f};
+  const float expected[kSteps] = {0.80f, 0.85f, 0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.3f, 1.45f, 1.6f, 1.75f};
   for (uint8_t s = 0; s < kSteps; ++s) {
     const LineSpacing ls = lineSpacingFor(s, LineSpacingScale::Font, 14, 30);
     EXPECT_NEAR(asFloat(ls.compression), expected[s], 1e-5f) << "step " << int{s};
@@ -29,7 +29,7 @@ TEST(LineSpacing, FontFactorsAreTheStepsPercentages) {
 }
 
 TEST(LineSpacing, BuiltinNotoSansFactorsPerStep) {
-  const float expected[kSteps] = {0.85f, 0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.35f, 1.5f, 1.65f};
+  const float expected[kSteps] = {0.75f, 0.80f, 0.85f, 0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.35f, 1.5f, 1.65f};
   for (uint8_t s = 0; s < kSteps; ++s) {
     EXPECT_NEAR(asFloat(lineSpacingFor(s, LineSpacingScale::BuiltinNotoSans, 14, 30).compression), expected[s], 1e-5f)
         << "step " << int{s};
@@ -37,17 +37,20 @@ TEST(LineSpacing, BuiltinNotoSansFactorsPerStep) {
 }
 
 TEST(LineSpacing, CjkPitchPerStep) {
-  const float pitchEm[kSteps] = {1.4f, 1.5f, 1.7f, 1.85f, 2.0f, 2.2f, 2.45f, 2.7f, 3.0f};
+  const float pitchEm[kSteps] = {1.2f, 1.3f, 1.4f, 1.5f, 1.7f, 1.85f, 2.0f, 2.2f, 2.45f, 2.7f, 3.0f};
   for (uint8_t s = 0; s < kSteps; ++s) {
     const LineSpacing ls = lineSpacingFor(s, LineSpacingScale::CjkPitch, 14, 42);
     EXPECT_NEAR(asFloat(ls.compression), pitchEm[s] * 29.0f / 42.0f, 1e-5f) << "step " << int{s};
     EXPECT_EQ(ls.bookFloor.raw(), 0u) << "step " << int{s};
   }
-  // 1.7 em of 29 px is 49.3, 1.85 em 53.65, 2 em 58, 2.2 em 63.8, 2.45 em 71.05, 2.7 em 78.3, 3 em 87. 1.4 em is 40.6
-  // and 1.5 em 43.5 px, a half pixel the float product may put on either side, so only their compressions are asserted.
+  // 1.2 em of 29 px is 34.8, 1.3 em 37.7, 1.7 em 49.3, 1.85 em 53.65, 2 em 58, 2.2 em 63.8, 2.45 em 71.05, 2.7 em 78.3,
+  // 3 em 87. 1.4 em is 40.6 and 1.5 em 43.5 px, a half pixel the float product may put on either side, so only their
+  // compressions are asserted.
   const auto cjkPitch = [](const LineSpacingStep s) {
     return pitch(42, lineSpacingFor(step(s), LineSpacingScale::CjkPitch, 14, 42).compression);
   };
+  EXPECT_EQ(cjkPitch(LineSpacingStep::Pct80), 35);
+  EXPECT_EQ(cjkPitch(LineSpacingStep::Pct85), 38);
   EXPECT_EQ(cjkPitch(LineSpacingStep::Pct100), 49);
   EXPECT_EQ(cjkPitch(LineSpacingStep::Pct110), 54);
   EXPECT_EQ(cjkPitch(LineSpacingStep::Pct120), 58);
@@ -86,7 +89,8 @@ TEST(LineSpacing, EveryScaleWidensStepByStep) {
 }
 
 TEST(LineSpacing, LabelsArePercentagesOfNormal) {
-  const char* const expected[kSteps] = {"90%", "95%", "100%", "110%", "120%", "130%", "145%", "160%", "175%"};
+  const char* const expected[kSteps] = {"80%",  "85%",  "90%",  "95%",  "100%", "110%",
+                                        "120%", "130%", "145%", "160%", "175%"};
   for (uint8_t s = 0; s < kSteps; ++s) {
     ASSERT_NE(lineSpacingStepLabel(s), nullptr) << "step " << int{s};
     EXPECT_STREQ(lineSpacingStepLabel(s), expected[s]);
@@ -157,11 +161,33 @@ TEST(LineSpacingStored, AnUnstampedValueKeepsItsSpacing) {
   }
 }
 
+// A file stamped 1 holds 90% 0 .. 175% 8 and Book's style 9: 80% and 85% went in under them.
+TEST(LineSpacingStored, AVersionOneValueMeansWhatItMeantThen) {
+  const LineSpacingStep then[] = {LineSpacingStep::Pct90,   LineSpacingStep::Pct95,  LineSpacingStep::Pct100,
+                                  LineSpacingStep::Pct110,  LineSpacingStep::Pct120, LineSpacingStep::Pct130,
+                                  LineSpacingStep::Pct145,  LineSpacingStep::Pct160, LineSpacingStep::Pct175,
+                                  LineSpacingStep::FromBook};
+  for (int stored = 0; stored < 10; ++stored) {
+    EXPECT_EQ(lineSpacingStepFromStored(stored, 1), step(then[stored])) << stored;
+  }
+}
+
+TEST(LineSpacingStored, AVersionOneValueKeepsItsSpacing) {
+  const float thenFont[] = {0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.3f, 1.45f, 1.6f, 1.75f};
+  for (int stored = 0; stored < 9; ++stored) {
+    const uint8_t now = lineSpacingStepFromStored(stored, 1);
+    EXPECT_NEAR(asFloat(lineSpacingFor(now, LineSpacingScale::Font, 14, 30).compression), thenFont[stored], 1e-5f)
+        << stored;
+  }
+}
+
 TEST(LineSpacingStored, UnusableValuesAreRefused) {
   EXPECT_EQ(lineSpacingStepFromStored(-1, 0), kNoLineSpacingStep) << "absent";
   EXPECT_EQ(lineSpacingStepFromStored(6, 0), kNoLineSpacingStep) << "past the old list";
+  EXPECT_EQ(lineSpacingStepFromStored(-1, 1), kNoLineSpacingStep) << "absent";
+  EXPECT_EQ(lineSpacingStepFromStored(10, 1), kNoLineSpacingStep) << "past version 1's list";
   EXPECT_EQ(lineSpacingStepFromStored(-1, LINE_SPACING_ORDER_VERSION), kNoLineSpacingStep) << "absent";
-  EXPECT_EQ(lineSpacingStepFromStored(10, LINE_SPACING_ORDER_VERSION), kNoLineSpacingStep) << "past the list";
+  EXPECT_EQ(lineSpacingStepFromStored(12, LINE_SPACING_ORDER_VERSION), kNoLineSpacingStep) << "past the list";
   EXPECT_EQ(lineSpacingStepFromStored(300, LINE_SPACING_ORDER_VERSION), kNoLineSpacingStep);
 }
 

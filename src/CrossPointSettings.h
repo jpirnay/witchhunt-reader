@@ -282,18 +282,20 @@ class CrossPointSettings {
   }
 
   // Stored by number, in LineSpacingStep's order (Epub/LineSpacing.h): a percentage of Normal, then FROM_BOOK, Book's
-  // style. Renumbered at LINE_SPACING_ORDER_VERSION 1; older files are converted as they load.
+  // style. Renumbered at LINE_SPACING_ORDER_VERSION 1 and 2; older files are converted as they load.
   enum LINE_COMPRESSION {
-    LINE_SPACING_90 = 0,
-    LINE_SPACING_95 = 1,
-    LINE_SPACING_100 = 2,
-    LINE_SPACING_110 = 3,
-    LINE_SPACING_120 = 4,
-    LINE_SPACING_130 = 5,
-    LINE_SPACING_145 = 6,
-    LINE_SPACING_160 = 7,
-    LINE_SPACING_175 = 8,
-    FROM_BOOK = 9,
+    LINE_SPACING_80 = 0,
+    LINE_SPACING_85 = 1,
+    LINE_SPACING_90 = 2,
+    LINE_SPACING_95 = 3,
+    LINE_SPACING_100 = 4,
+    LINE_SPACING_110 = 5,
+    LINE_SPACING_120 = 6,
+    LINE_SPACING_130 = 7,
+    LINE_SPACING_145 = 8,
+    LINE_SPACING_160 = 9,
+    LINE_SPACING_175 = 10,
+    FROM_BOOK = 11,
     LINE_COMPRESSION_COUNT
   };
   // Stored by number, in ParagraphIndent's order (Epub/ParagraphIndent.h): none, four sizes in ems, then Book's style.

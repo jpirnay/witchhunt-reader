@@ -61,7 +61,7 @@ Each section ends with a "Both have" line for features the two firmwares share.
 | Images inside a line of text | ✅ icons and symbols up to twice the line height, CSS `vertical-align` | ❌ placed as blocks |
 | CSS `white-space` | ✅ all six values: kept spaces, tabs and line breaks, `nowrap`, `pre-line` | ⚠️ `pre`, `pre-wrap` and `break-spaces` keep spaces; `nowrap` and `pre-line` ignored |
 | CSS `initial-letter` | ✅ 2 to 6 lines, raised or sunk | ⚠️ 2 to 6 lines, no raise or sink |
-| Line spacing | ✅ 90–175 % in 9 steps, or the book's `line-height` | ✅ 100–175 % in 7 steps |
+| Line spacing | ✅ 80–175 % in 11 steps, or the book's `line-height` | ✅ 100–175 % in 7 steps |
 | Word spacing | ❌ | ✅ 50–200 % of a space |
 | Character spacing | ❌ | ✅ −2 to +2 px |
 | Paragraph indent | ✅ None, 0.5 to 2 em, or the book's own | ✅ 0 to 5 spaces |
