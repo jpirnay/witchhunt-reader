@@ -17,6 +17,7 @@
 #include "MappedInputManager.h"
 #include "SerialTestApi.h"  // SERIAL_TEST_API
 #include "TouchUi.h"
+#include "activities/MinuteTick.h"
 #include "activities/browser/OpdsBackTo.h"
 #include "activities/home/LibraryTab.h"
 #include "activities/network/NetworkMode.h"
@@ -130,6 +131,8 @@ class ActivityManager {
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
   volatile bool requestedUpdate = false;
+  // Whether that render draws only the minute tick: every update request but the tick's clears it.
+  MinuteTick::ClockOnlyFrame clockOnlyFrame;
 
   // Set when something earlier in THIS loop() tick has already put the displayed frame in the
   // write framebuffer, so a later partial paint must not sync over it. Cleared at the top of
@@ -162,7 +165,9 @@ class ActivityManager {
 
  public:
   // render() gets this for free. A screen that paints from anywhere else calls it first.
-  void armGhostClearingRefresh();
+  // `clockOnly`: the frame draws only the minute tick (MinuteTick::ClockOnlyFrame), which does not
+  // bring the cadence HALF; that waits for the next frame that changes something.
+  void armGhostClearingRefresh(bool clockOnly = false);
   // Dark Mode: sets the panel's polarity for the screen on top (DarkMode::invertsOutput). Every activity change and
   // every render pass does, so a change of the setting lands on the next frame; boot does before its first paint.
   // Under RenderLock, or before anything renders: a refresh in flight is drained first.
@@ -362,6 +367,9 @@ class ActivityManager {
   // definition for why this is a synthesis rather than a per-screen handler.
   void dispatchListSwipe();
   void dispatchHintStripTap();
+  // An inward swipe from the left edge is Back, outside the reader, on a screen that allows it
+  // (Activity::backsOutOnEdgeSwipe).
+  void dispatchEdgeSwipeBack();
 #endif  // CP_TOUCH_UI
 
   // If immediate is true, the update will be triggered immediately.

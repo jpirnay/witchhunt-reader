@@ -40,6 +40,10 @@ class KeyboardEntryActivity : public Activity {
         inputType(inputType) {}
 
   bool keepsConfirmGestures() const override { return true; }
+#if CP_TOUCH_UI
+  // A finger slides across the keys; backing out would throw away the text in hand.
+  bool backsOutOnEdgeSwipe() const override { return false; }
+#endif
   void onEnter() override;
   void onExit() override;
   void loop() override;

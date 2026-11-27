@@ -166,6 +166,10 @@ class HomeActivity final : public Activity {
 
  public:
   bool drawsBookText() const override { return true; }
+#if CP_TOUCH_UI
+  // A sideways swipe moves the carousel; and there is nothing to back out to.
+  bool backsOutOnEdgeSwipe() const override { return false; }
+#endif
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string focusBookPath = {},
                         int focusSelectorIndex = -1)
       : Activity("Home", renderer, mappedInput),

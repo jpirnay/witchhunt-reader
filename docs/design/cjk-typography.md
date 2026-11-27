@@ -376,7 +376,9 @@ Japanese, a Chinese and a Korean book at 1.5, 1.7 and 2.0 em against the old Nor
 - **The steps.** First five, Tight to Widest: 1.5, 1.7, 1.85, 2.0 and 2.2 em for CJK books (maintainer). #717 made them
   nine, named by their percentage of Normal (90% to 175%), and kept the five's exact values as 95% to 130%: the CJK
   pitch runs 1.4, 1.5, 1.7, 1.85, 2.0, 2.2, 2.45, 2.7 and 3.0 em (`kCjkPitchHundredthsEm`). Other books keep factors on
-  the font's line height (`kFontFactorPct`; lower ones for the built-in Noto Sans, `kNotoSansFactorPct`).
+  the font's line height (`kFontFactorPct`; lower ones for the built-in Noto Sans, `kNotoSansFactorPct`). Issue #931
+  added 80% and 85% below them, a tenth of an em a step for CJK books (1.2 and 1.3 em) and 75% and 80% for the
+  built-in Noto Sans; stored steps moved up two (`LINE_SPACING_ORDER_VERSION` 2).
 - **Book's style** reads each block's `line-height`, inherited as CSS has it, floored at 95%. EBPAJ books declare 1.75;
   calibre conversions carry 1.2, which the floor lifts to 1.5 em in a CJK book.
 - **A per-book override**, in the quick overrides and the reader menu (`QuickOverridesActivity`,

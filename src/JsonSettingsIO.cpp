@@ -543,8 +543,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   }
 
   // The line-spacing steps were renumbered at LINE_SPACING_ORDER_VERSION 1 (90% below the old Tight, 145% to 175% above
-  // its Widest). Read from the document, as the sizes above are: the loop above bounds an old value by the new list and
-  // keeps its number, which now names another step. An old Book's Style stays Book's Style.
+  // its Widest) and 2 (80% and 85% below 90%). Read from the document, as the sizes above are: the loop above bounds an
+  // old value by the new list and keeps its number, which now names another step. An old Book's Style stays Book's
+  // Style.
   {
     const auto fileVersion = static_cast<uint8_t>(doc["lineSpacingOrderV"].as<int>());
     if (fileVersion < LINE_SPACING_ORDER_VERSION) {
@@ -887,7 +888,8 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(std::vector<LegacyRecentBook>& o
   // Which meaning the per-book size overrides in this file carry (point sizes since version 2).
   // Absent (0) is every file written before the sizes were put in pixel order.
   const auto fontSizeOrderV = static_cast<uint8_t>(doc["fontSizeOrderV"].as<int>());
-  // And which numbering the per-book line-spacing overrides are in: absent (0) before 90% and 145% to 175% existed.
+  // And which numbering the per-book line-spacing overrides are in: absent (0) before 90% and 145% to 175% existed, 1
+  // before 80% and 85%.
   const auto lineSpacingOrderV = static_cast<uint8_t>(doc["lineSpacingOrderV"].as<int>());
 
   for (JsonObject obj : arr) {

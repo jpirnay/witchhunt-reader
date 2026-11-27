@@ -355,6 +355,17 @@ inline bool keepsSecondaryBuffer() {
 #endif
 }
 
+// The reader menu's Sync tab without a KOReader account: one row that opens the KOReader settings over the book
+// (EpubReaderMenuActivity::rebuildSyncItems). The C3s, for now, keep the tab for an account that is set up, as before:
+// the settings and their keyboard over the reader and its menu have not been measured on the X4's heap
+// (docs/future_work/memory-and-parsing/c3-heap-for-kosync-setup-from-the-reader-menu.md). The PSRAM boards offer it.
+// cppcheck, which reads one board's build, sees only the declaration and checks both sides.
+#if defined(CPPCHECK_ANALYSIS)
+bool offersSyncSetupInReader();
+#else
+inline bool offersSyncSetupInReader() { return keepsSecondaryBuffer(); }
+#endif
+
 // A chapter build lays out in PSRAM, in a region of its own (Section::setOwnedBuildRegionBytes) or in the arena lent in
 // place of the secondary buffer, so it touches neither frame buffer nor the heap the reader draws from: the page the
 // build shows can get its gray while the build goes on, from the secondary buffer (BuildPageGray.h, Pass::Restore). Not
@@ -411,6 +422,18 @@ inline bool sendsSleepEventsFromCleanBoot() { return !keepsSecondaryBuffer(); }
 bool restartsAfterWifiSession();
 #else
 inline bool restartsAfterWifiSession() { return !keepsSecondaryBuffer(); }
+#endif
+
+// A new UI theme or UI font size waits for Settings to close (SettingsActivity::onExit), rather than laying the open
+// screen out again at once (SettingsActivity::applyUiLookIfChanged). The C3s, for now: the live change replaces the
+// theme object and binds the UI fonts again with the screens below Settings still resident, which nobody has measured
+// on the X4's heap yet (docs/future_work/memory-and-parsing/c3-heap-for-the-live-ui-theme-and-font-size.md). The PSRAM
+// boards change at once (T5S3: Settings at 109 KB internal free before and after a theme and a font size round trip,
+// 2026-11-26). cppcheck sees only the declaration, as above.
+#if defined(CPPCHECK_ANALYSIS)
+bool defersUiLookChange();
+#else
+inline bool defersUiLookChange() { return !keepsSecondaryBuffer(); }
 #endif
 
 // A frontlight is present: PWM (LEDC or PM1-driven), or an LED driver on the I2C bus (the BOOX Picco's).
