@@ -37,6 +37,7 @@
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <esp_private/esp_clk.h>
+#include <esp_wifi.h>
 #include <soc/rtc.h>
 
 #include <algorithm>
@@ -1510,6 +1511,22 @@ void setup() {
   HalI2cBus::ensureBusStarted();
   powerManager.begin();
   halTiltSensor.begin();
+
+  // The board's Wi-Fi TX-power ceiling (BoardProfile::wifiMaxTxPower, quarter-dBm): only the
+  // EEGO A4 sets one, 15 dBm, the cap its stock firmware applies. The IDF takes it only once
+  // Wi-Fi has started, so it is applied on every STA and AP start rather than at each place
+  // that brings Wi-Fi up. Compiled in only for a build whose board has a cap; the one build
+  // that holds two boards (X3 + X4) has none.
+  // Ported from crosspoint-reader/crosspoint-reader PR #3993
+  // ("fix: Add WiFi TX power limit configuration", Justin Mitchell).
+  if constexpr (BoardConfig::DEFAULT_DEVICE.wifiMaxTxPower != 0) {
+    const auto applyTxCap = [](arduino_event_id_t, arduino_event_info_t) {
+      const esp_err_t err = esp_wifi_set_max_tx_power(static_cast<int8_t>(BoardConfig::ACTIVE.wifiMaxTxPower));
+      if (err != ESP_OK) LOG_ERR("WIFI", "TX power cap failed: %d", err);
+    };
+    WiFi.onEvent(applyTxCap, ARDUINO_EVENT_WIFI_STA_START);
+    WiFi.onEvent(applyTxCap, ARDUINO_EVENT_WIFI_AP_START);
+  }
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
   BootDiag::markPhase(BootPhase::HwInit);
 
