@@ -12,6 +12,7 @@ namespace background_sync {
 void waitBeforeRadioUse(const char* tag, const std::function<void()>& showWaiting) {
 #if CROSSPOINT_KOREADER_AUTOSYNC
   if (!KOReaderSyncWorker::isBusy()) return;
+  LOG_INF(tag, "Waiting for the background sync before using the radio");
   showWaiting();
   constexpr unsigned long kDrainTimeoutMs = 10000;
   if (!KOReaderSyncWorker::drain(kDrainTimeoutMs)) {
