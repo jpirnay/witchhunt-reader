@@ -1,0 +1,44 @@
+# BLE gate on the C3 core rebuild (2026-11-28)
+
+Branch `spike/ble-c3-rebuild-gate`, never merged. `perf/c3-sdk-trim` (the rebuilt C3 core with the #4212 trim) plus the
+measurement probe of `chore/ble-c3-spike` (`src/BleSpike.cpp`, `CMD:BLE`), with the flash-only controller selected the
+supported way: `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y` and upstream's sizes in `custom_sdkconfig`, and CrossPoint's
+`scripts/patch_arduino_ble_controller.py` (#3785) linking `libbtdm_app_flash.a`. No link-time stand-ins.
+
+## Build (`env:default`)
+
+| | trim branch | gate | delta |
+|---|---|---|---|
+| `Flash:` | 6,015,995 | 6,396,223 | +380,228 (+235,472 against master); 157,377 B left in the slot |
+| `RAM:` | 57,540 | 66,372 | +8,832 |
+| `.iram0.text` | 70,250 | 71,762 | +1,512 |
+
+`libbtdm_app_flash.a` links from the IDF package; `r_lld_adv_end` is at 0x422b35dc (flash), not in ROM.
+
+## X3 (70:AF:09:5F:8A:84, app1), free / largest block
+
+| | value | cost |
+|---|---|---|
+| Home after a boot, BLE linked, off, controller memory kept | 69,432 / 51,188 | −10,152 against the trim build, −1,412 against master |
+| Same, memory released at boot (`KEEP=0`) | 70,608 / 51,188 | the boot gate returns 1,176-1,264 B |
+| Home, controller alone up and scanning (`CTRL`) | 39,416 / 36,852 | 30.4 KB; `run_in_flash=1`, `cmds_ok=5`, 19 advertising reports in 3 s, up in 37 ms |
+| Home, after `CTRL_OFF` | 69,396 / 51,188 | all back |
+| Home, NimBLE host up (`HOST`, the SDK's `BleKeyboardHost`) | 18,424 / 15,860 | 51.3 KB |
+| Home, after `HOST_OFF` | 64,624 / 25,588 | 4.8 KB stays allocated; the largest block halves; 5 more cycles change nothing |
+| In a book (`/test/alice-illustrated.epub`, spine 3 page 2) | 62,300 / 57,332 | |
+| In the book, controller alone up | 32,768 / 29,684 | 29.9 KB |
+| In the book, after one controller cycle | 62,280 / 30,708 | the largest block stays at 30.7 KB, at Home too |
+| In the book, NimBLE host up | 11,396 / 8,692 | |
+
+No panic, abort or failed allocation in any of the runs. No HID remote was in pairing mode nearby (`devices=0`).
+
+## What it decides
+
+- The flash-only controller runs on the X3 through the rebuild. Not tested: a linked remote through flash writes
+  (needs a remote), Wi-Fi alongside (the C3 never runs both).
+- NimBLE beside the two-framebuffer reader leaves 11 KB free and an 8.7 KB largest block: not viable on the C3 without
+  the reader going single-buffer while the radio is up.
+- The controller alone costs about 30 KB, right at the analysis' threshold for a hand-written keypress-only host.
+- One start/stop in a book halves the largest block for the rest of the boot: whatever host, the C3 radio must start
+  at most once per boot, into room reserved for it.
+- The boot gate (`bleInUse()` from a setting, reboot to enable) is worth 1.2 KB: not worth a reboot.
