@@ -15,6 +15,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/BackgroundSyncWait.h"
 #include "network/WifiSessionEnd.h"
 #include "util/DecimalFormat.h"
 
@@ -54,6 +55,19 @@ static void formatElapsed(char* buf, size_t bufSize, int32_t totalSeconds) {
 
 void SyncTimeActivity::onEnter() {
   Activity::onEnter();
+
+  // Before this screen joins, or turns the radio off here and in onExit(): a background push may hold it.
+  background_sync::waitBeforeRadioUse("CLK", [this] {
+    {
+      RenderLock lock(*this);
+      state = WAITING_FOR_SYNC;
+    }
+    requestUpdateAndWait();
+  });
+  if (state == WAITING_FOR_SYNC) {
+    RenderLock lock(*this);
+    state = CONNECTING;
+  }
 
   if (WiFi.status() == WL_CONNECTED) {
     onWifiSelectionComplete(true);
@@ -136,6 +150,13 @@ void SyncTimeActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer,
                  Rect(contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight),
                  tr(STR_SYNC_TIME));
+
+  if (state == WAITING_FOR_SYNC) {
+    renderer.drawCenteredText(UI_10_FONT_ID, bodyRect.y + bodyRect.height / 2, tr(STR_KO_BG_SYNC_WAIT), true,
+                              EpdFontFamily::BOLD);
+    renderer.displayBuffer();
+    return;
+  }
 
   if (state == SYNCING) {
     renderer.drawCenteredText(UI_10_FONT_ID, bodyRect.y + bodyRect.height / 2, tr(STR_SYNCING_CLOCK), true,

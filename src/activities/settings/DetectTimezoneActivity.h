@@ -16,7 +16,7 @@ class DetectTimezoneActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum State { CONNECTING, DETECTING, SUCCESS, FAILED };
+  enum State { WAITING_FOR_SYNC, CONNECTING, DETECTING, SUCCESS, FAILED };
   State state = CONNECTING;
   std::string detectedTimezone;
   bool dstKnown = false;

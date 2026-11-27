@@ -17,6 +17,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/BackgroundSyncWait.h"
 #include "network/HttpDownloader.h"
 #include "network/WifiSessionEnd.h"
 #include "util/TimezoneDetectMap.h"
@@ -128,6 +129,19 @@ bool detectTimezoneSetting(uint8_t& outSetting, std::string& outIana, bool& outD
 void DetectTimezoneActivity::onEnter() {
   Activity::onEnter();
 
+  // Before this screen joins, or turns the radio off here and in onExit(): a background push may hold it.
+  background_sync::waitBeforeRadioUse("CLK", [this] {
+    {
+      RenderLock lock(*this);
+      state = WAITING_FOR_SYNC;
+    }
+    requestUpdateAndWait();
+  });
+  if (state == WAITING_FOR_SYNC) {
+    RenderLock lock(*this);
+    state = CONNECTING;
+  }
+
   // Free the heap the WiFi stack needs before it is brought up, not after -
   // association itself is the allocation-heavy step, well ahead of TLS. Matters
   // most here because SettingsActivity is still on the stack below us with its
@@ -217,6 +231,13 @@ void DetectTimezoneActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer,
                  Rect(contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight),
                  tr(STR_DETECT_TIMEZONE));
+
+  if (state == WAITING_FOR_SYNC) {
+    renderer.drawCenteredText(UI_10_FONT_ID, bodyRect.y + bodyRect.height / 2, tr(STR_KO_BG_SYNC_WAIT), true,
+                              EpdFontFamily::BOLD);
+    renderer.displayBuffer();
+    return;
+  }
 
   if (state == CONNECTING) {
     renderer.drawCenteredText(UI_10_FONT_ID, bodyRect.y + bodyRect.height / 2, tr(STR_CONNECTING), true,
