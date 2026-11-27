@@ -48,7 +48,8 @@ file, and a follow-up it finds goes into a new file. Neither touches this page o
 PR 1 ran on the Picco; any PSRAM board does. What each check looks for:
 
 - **The log line.** Every session end logs `[WIFI] Session end [<tag>]: internal free=... largest=... (boot .../...,
-  min 67584/24576) -> carry on` (or `-> restart`). On a carry-on, the uptime in the next log lines keeps rising (no
+  min 67584/24576, 2nd buffer held) -> carry on` (or `-> restart`; `not held` on the C3s, whose free figure then
+  counts the secondary framebuffer the boot baseline did not). On a carry-on, the uptime in the next log lines keeps rising (no
   restart), and `CMD:STATE` shows the screen the site should return to. On PSRAM builds `STATE` also reports
   `imaxblock`, the largest internal block (`heap` is internal free).
 - **A second session after a carry-on** must join and finish. PR 1 ran five KOReader syncs in a row, then Weather.

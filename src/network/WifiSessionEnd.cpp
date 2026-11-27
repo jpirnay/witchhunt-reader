@@ -2,6 +2,7 @@
 
 #include <HalCapabilities.h>
 #include <HalClock.h>
+#include <HalDisplay.h>
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
@@ -63,11 +64,14 @@ Exit end(const char* tag) {
             static_cast<unsigned long>(bootFree), static_cast<unsigned long>(bootLargest),
             static_cast<unsigned long>(kMinFreeInternalBytes), static_cast<unsigned long>(kMinLargestInternalBytes));
   } else {
-    LOG_INF("WIFI", "Session end [%s]: internal free=%lu largest=%lu (boot %lu/%lu, min %lu/%lu) -> %s", tag,
-            static_cast<unsigned long>(freeInternal), static_cast<unsigned long>(largestInternal),
+    // Whether the secondary framebuffer is resident: the C3s gave it back to the heap before the session
+    // (trimMemoryForNetworkSession()), so their free figure counts it (48,000 B on the X4, 52,272 B on the X3) where
+    // the boot baseline does not.
+    LOG_INF("WIFI", "Session end [%s]: internal free=%lu largest=%lu (boot %lu/%lu, min %lu/%lu, 2nd buffer %s) -> %s",
+            tag, static_cast<unsigned long>(freeInternal), static_cast<unsigned long>(largestInternal),
             static_cast<unsigned long>(bootFree), static_cast<unsigned long>(bootLargest),
             static_cast<unsigned long>(kMinFreeInternalBytes), static_cast<unsigned long>(kMinLargestInternalBytes),
-            exit == Exit::CarryOn ? "carry on" : "restart");
+            display.hasSecondaryBuffer() ? "held" : "not held", exit == Exit::CarryOn ? "carry on" : "restart");
   }
   return exit;
 }
