@@ -208,9 +208,59 @@ predicted from the map, with the NVS-gated boot release and BLE off. "MMU pages"
 
 On the C3 every design pays either about 23 KB of heap at every boot (ROM-assisted) or about 140 KB more flash
 (flash-only). A custom host saves about 100 KB of flash with either; with NimBLE, the flash-only build leaves only
-18 KB of the slot for all future growth. Master's C3 sdkconfig trim (`docs/future_work/font-flash.md`, "The C3
-sdkconfig trim", about −145 KB of flash) would buy that room back. It needs the core rebuild that would also set
-`CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY` (and flash auto-suspend) the supported way.
+18 KB of the slot for all future growth. The core-rebuild route below would buy that room back.
+
+## The core-rebuild route
+
+Everything above links the prebuilt Arduino core. A from-source core rebuild (`custom_sdkconfig`; ours is spelled
+`custom_sdk_config` and inert, by decision) changes three things for BLE. The trim's option list, the check against our
+code and the rebuild's measured costs are on master in `docs/future_work/font-flash.md`, "The C3 sdkconfig trim".
+
+1. **Flash.** Upstream CrossPoint's #4212 trim compiles out ESP-IDF features we never switch on:
+   - IPv6, PPP and NAT;
+   - the Wi-Fi roaming assists and the hotspot's WPA3;
+   - 11 of mbedTLS's 12 curves, Camellia and SHA-512.
+
+   Upstream measured −145,440 B on its C3 release build, about the flash-only controller's +140 KB over the
+   ROM-assisted one.
+2. **The controller the supported way.**
+   - `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y` makes IDF link `libbtdm_app_flash.a`, build `bt.c` for it and leave out the
+     two ROM scripts, so option B's five stand-ins go.
+   - `CONFIG_SPI_FLASH_AUTO_SUSPEND=y` lets the controller's interrupt run during a flash erase, which removes the
+     flash-only controller's main run-time risk. Whether the X4's and X3's flash chips support suspend is unchecked.
+   - The controller's and NimBLE's sizes become sdkconfig entries, so `scripts/ble_spike_nimble_c3.h` goes.
+
+   Upstream builds its page-turner support this way (`${ble_page_turner.custom_sdkconfig}` in its
+   `[firmware_tuned]`).
+3. **Heap.** Our `[firmware_tuned]` block goes live with the rebuild. It moves the Wi-Fi hot paths out of IRAM, about
+   25-30 KB more heap at every boot by its comment, for slower Wi-Fi transfers. It also shrinks two timer stacks, about
+   5.5 KB. Its NOTE totals 32-37 KB; that was never measured on a device. The Wi-Fi move alone is about the
+   ROM-assisted controller's 23 KB of IRAM, a second way to pay for BLE.
+
+A rough combination. Its inputs are upstream's trim figure, the block's comments and this spike's maps, never one build:
+
+| Build | Free in the app slot | Boot heap vs master today |
+|---|---|---|
+| master today | 397,895 B | 0 |
+| rebuild + trim + flash-only controller + NimBLE | about 160 KB | about +20 to +30 KB |
+| rebuild + trim + flash-only controller + custom host | about 260 KB | about +30 to +35 KB |
+
+The price is build infrastructure, not firmware (measured in a trial on 2026-09-10):
+
+- builds take 28.5 to 38 minutes, on every C3 CI job;
+- every S3 env re-downloads about 1 GB of framework packages unless upstream's `scripts/patch_pioarduino_cache.py` is
+  ported;
+- the reinstall is fragile on Windows;
+- a removed component deletes its headers from the framework package every worktree shares.
+
+Order, if taken on:
+
+1. Port the cache patch.
+2. Fix the name and take an X4 pass (heap, Wi-Fi speed, hotspot, TLS).
+3. Add #4212's options and measure flash.
+4. BLE on top, with `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY` and auto-suspend.
+
+## The S3 boards
 
 On the S3 boards (8 MB of PSRAM) the heap is not the binding limit, so the SDK's `BleKeyboardHost` on NimBLE is the
 shortest path there. Upstream puts NimBLE's host in PSRAM with a forced include (`s3_nimble_psram.h`). Not measured
@@ -256,7 +306,7 @@ scope (`SCOPE.md`).
    switching controllers, `cmp` the new `firmware.bin` against the app inside `firmware.factory.bin`: a cached build
    can leave the other build's app in the factory image.
 3. **Decide the C3 design** from the table above and 2: the heap the X3 can give up against the flash it can give
-   up. The S3 boards can take the SDK host independently.
+   up, on the prebuilt core or by the core-rebuild route. The S3 boards can take the SDK host independently.
 4. Only then: design the custom host (see above) and the boot gate, if the C3 goes ahead.
 
 ## Traps met on the way
