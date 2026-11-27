@@ -1,6 +1,7 @@
 #include "FontDownloadActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -15,12 +16,15 @@
 #include "SdCardFontGlobals.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
+#include "UiLanguage.h"
+#include "activities/ActivityManager.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/WifiSessionEnd.h"
 #include "util/ByteSize.h"
 #include "util/FontDownloadRules.h"
 #include "util/FontManifestReader.h"
@@ -44,9 +48,9 @@ void FontDownloadActivity::onEnter() {
           static_cast<unsigned>(sizeof(::UiAppHost)));
 
   // Free the heap the WiFi stack needs before it is brought up, not after -
-  // association itself is the allocation-heavy step, well ahead of TLS. That
-  // includes the per-category SettingInfo vectors of the SettingsActivity below
-  // us, which fragment the heap; onExit() reboots, so they are never needed again.
+  // association itself is the allocation-heavy step, well ahead of TLS. On the C3s
+  // that includes the per-category SettingInfo vectors of the SettingsActivity below
+  // us, which fragment the heap; onExit() reboots there, so they are never needed again.
   // WifiSelectionActivity sets WIFI_STA itself, so no radio work happens here.
   releaseMemoryForDownload(renderer, "FONT");
 
@@ -59,18 +63,51 @@ void FontDownloadActivity::onEnter() {
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
+void FontDownloadActivity::leave() {
+  // The C3s restart to returnTo_ from onExit(): nothing is built here for a screen that restart discards, on the heap
+  // the download left.
+  if (HalCapabilities::restartsAfterWifiSession()) {
+    finish();
+    return;
+  }
+  switch (returnTo_) {
+    case ReturnTo::Book:
+      if (!APP_STATE.openEpubPath.empty()) {
+        // As the restart's reader resume did: the book's first page with a HALF over this screen.
+        activityManager.openBook(APP_STATE.openEpubPath);
+        return;
+      }
+      activityManager.goHome();  // where the restart without a book led (silentRestart())
+      return;
+    case ReturnTo::Home:
+      activityManager.goHome();
+      return;
+    case ReturnTo::Settings:
+      // Pushed from Settings (the plain Font Manager), finish() goes back to its tab and row. Opened by replace (the
+      // language picker's offer, Check for updates' pack update: PackOffer::ask(), OtaUpdateActivity::updatePacks())
+      // nothing is below, and finish() would go Home: Settings again, where the restart led.
+      if (activityManager.hasActivityBelow()) {
+        finish();
+      } else {
+        activityManager.goToSettings();
+      }
+      return;
+  }
+}
+
 void FontDownloadActivity::onExit() {
-  // Routing closes first (UiListActivity::onExit()); the restart below never returns.
+  // Routing closes first (UiListActivity::onExit()); a restart below never returns.
   UiListActivity::onExit();
 
-  // Always silentRestart on exit, regardless of WiFi state. Even if a deep
-  // error path turned WiFi off, we still did expensive network/TLS work and
-  // the heap is fragmented past the point a normal session can recover (see
-  // [project-font-download-heap-stash]). A reboot here gives the next
-  // activity a pristine heap.
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(false);
-    delay(30);
+  // The session ends here whether or not the radio is still up: a deep error path may have turned it off after the
+  // TLS work. The C3s always restart, which also gives back the screens below that releaseMemoryForDownload() dropped;
+  // the PSRAM boards kept those and go on in this boot while the heap allows, to where leave() (or a global action)
+  // sent them.
+  if (wifi_session::end("FONT") == wifi_session::Exit::CarryOn) {
+    // The restart read a new or deleted UI language pack at the next start. Under the exclusive render lock that
+    // onExit() runs in (reload() needs it held), after this screen is gone, so none of its strings outlive the swap.
+    if (languagePacksChanged_) UiLanguage::reload();
+    return;
   }
   // Opened by an offer: back where it was made. A book's opens hyphenated by the pack.
   if (returnTo_ == ReturnTo::Book && !APP_STATE.openEpubPath.empty()) silentRestartToReader();
@@ -80,7 +117,7 @@ void FontDownloadActivity::onExit() {
 
 void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
-    finish();
+    leave();
     return;
   }
 
@@ -714,7 +751,7 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
   if (family.pack(0)) {
     // A pack's file goes to its folder, not into a family folder: a hyphenation pack's to /.crosspoint/hyphenation/,
     // copied into the flash store there and then (HyphenationPacks::packInstalled), a UI language pack's to
-    // /.crosspoint/lang/, read at the next start, which leaving the Font Manager makes.
+    // /.crosspoint/lang/, read when the Font Manager is left: at the restart on the C3s, in onExit() elsewhere.
     if (!FontInstaller::installStagedPack(family, 0, stagingDir)) {
       RenderLock lock(*this);
       state_ = ERROR;
@@ -726,6 +763,7 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
     family.setInstalled(0, true);
     family.setHasUpdate(0, false);
     family.setHasResumableDownload(0, false);
+    if (family.languagePack(0)) languagePacksChanged_ = true;
     RenderLock lock(*this);
     completed_ = family.languagePack(0) ? Completed::Language : Completed::Hyphenation;
     state_ = COMPLETE;
@@ -825,6 +863,7 @@ void FontDownloadActivity::deleteFamilyAtIndex(int familyIndex) {
                            : fontInstaller_.deleteFamily(families_.name(familyIndex));
   if (result == FontInstaller::Error::OK) {
     if (!pack) fontInstaller_.refreshRegistry();
+    if (families_.languagePack(familyIndex)) languagePacksChanged_ = true;
     {
       RenderLock lock(*this);
       families_.setInstalled(familyIndex, false);

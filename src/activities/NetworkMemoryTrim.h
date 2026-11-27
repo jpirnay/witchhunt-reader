@@ -41,10 +41,12 @@ void trimMemoryForNetworkSession(const GfxRenderer& renderer, const char* logTag
 // trimMemoryForNetworkSession(), then everything else the session will not draw or
 // read again, for a download that needs the heap in one piece: the font manager and
 // the firmware update, whose 16 KB TLS records (or the chunks that replace them) need
-// contiguous blocks the X3 barely has with Wi-Fi up. Both reboot on exit, and so must
-// any new caller: the settings lists of the activities buried below are dropped
-// (ActivityManager::releaseBuriedActivityState()), and so are the loaded SD font and
-// the global bookmark index. The SD font registry stays; the font manager installs
+// contiguous blocks the X3 barely has with Wi-Fi up. On the boards where
+// HalCapabilities::restartsAfterWifiSession() is true, the settings lists of the
+// activities buried below are dropped (ActivityManager::releaseBuriedActivityState())
+// and so is the loaded SD font, so a caller must reboot on exit there, as both do
+// through wifi_session::end(). The other boards keep both: their screens below come
+// back in this boot. The SD font registry stays everywhere; the font manager installs
 // through it. Call it from the current activity, before WiFi comes up and again before
 // the transfer; idempotent.
 void releaseMemoryForDownload(const GfxRenderer& renderer, const char* logTag);

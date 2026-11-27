@@ -11,4 +11,9 @@ namespace UiLanguage {
 /// strings until it next draws.
 void apply(Language language);
 
+/// Read the stored language again and resolve its strings, as a boot does: after a web session, whose uploads can add,
+/// replace or delete that language's pack. For a caller that already holds the render lock, as an activity's onExit()
+/// does: apply() takes it, and it is not recursive. Nothing may keep a string from before across this.
+void reload();
+
 }  // namespace UiLanguage

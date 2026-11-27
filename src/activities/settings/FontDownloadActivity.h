@@ -26,8 +26,9 @@ class FontDownloadActivity final : public UiListActivity {
     char family[FontInstaller::MAX_FAMILY_NAME_LEN + 1] = {};
     bool packUpdates = false;
   };
-  // Where leaving restarts: Home, for Home's offer; the open book (APP_STATE.openEpubPath), for a book's offer;
+  // Where leaving leads: Home, for Home's offer; the open book (APP_STATE.openEpubPath), for a book's offer;
   // Settings, for the plain Font Manager and the offers made there (a picked interface language, Check for updates).
+  // The C3s restart there; the PSRAM boards go there in this boot while the heap allows (leave(), onExit()).
   enum class ReturnTo : uint8_t { Home, Book, Settings };
   FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Wanted& wanted, ReturnTo returnTo);
   // The plain Font Manager, opened from Settings, where Back leads: also after a join backed out of, it used to
@@ -106,6 +107,9 @@ class FontDownloadActivity final : public UiListActivity {
   enum class Completed : uint8_t { Font, Hyphenation, Language, Update };
   Completed completed_ = Completed::Font;
   bool cancelRequested_ = false;
+  // A UI language pack was installed or deleted: the active language's strings are read again when this screen is
+  // left without a restart (onExit()), as the restart read them at the next start.
+  bool languagePacksChanged_ = false;
   // In downloadAll() or updateAll(): an install leaves the registry's discovery, and the note it decides, to the end
   // of the batch (finishBatch()), rather than scanning every font folder again per family while TLS holds the heap.
   bool inBatch_ = false;
@@ -123,6 +127,8 @@ class FontDownloadActivity final : public UiListActivity {
   unsigned long lastProgressUpdateMs_ = 0;
 
   // --- The family list (UiListActivity) ---
+  // Back from the list leaves for returnTo_ (leave()), not the base's plain finish().
+  void onBackButton() override { leave(); }
   int listCount() const override { return state_ == FAMILY_LIST ? listItemCount() : 0; }
   const char* headerTitle() const override;
   void buildScreen(UiScreen& screen) override;
@@ -136,6 +142,10 @@ class FontDownloadActivity final : public UiListActivity {
   [[nodiscard]] const char* footerConfirmLabel() const override;
   static void provideRow(void* ctx, uint16_t index, freeink::ui::ListItem& item);
 
+  // Back, and a join backed out of: to returnTo_. Every offer replaced its screen with this one (PackOffer::ask(),
+  // OtaUpdateActivity::updatePacks()), which drops the stack, so a plain finish() would go Home; only the plain Font
+  // Manager is pushed over Settings. The C3s finish() and restart to returnTo_ from onExit().
+  void leave();
   void onWifiSelectionComplete(bool success);
   // Selects the rows of wanted_ and downloads what is not installed: the language pack, the family, then the
   // hyphenation pack, each once the one before is in place; or updates the packs, for Check for updates. Once.

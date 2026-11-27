@@ -262,6 +262,9 @@ class ActivityManager {
 
   // An activity on the stack, current or buried under a child, holds the radio.
   bool wifiActivityOnStack() const { return activityUsesWifi.load(std::memory_order_relaxed); }
+  // Loop task only: whether the current activity has one below it for finish() to go back to. False for a screen
+  // opened by replace (replaceActivity() drops the stack), whose finish() goes Home.
+  bool hasActivityBelow() const { return !stackActivities.empty(); }
 
   bool inSleepTransition() const { return sleepTransition; }
 
