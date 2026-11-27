@@ -12,6 +12,7 @@ active profile through `BoardConfig::ACTIVE` and does not hardcode pins.
 | LilyGo T5S3 Pro | ESP32-S3, 8 MB PSRAM | 4.7" 960x540 parallel panel, driven through LovyanGFX | GT911 touch, capacitive Home key, one user key | `lilygo_t5s3` |
 | Murphy M3 | ESP32-S3, 8 MB PSRAM | UC8253, 416x240 | CHSC6x touch, Up, Down, Confirm | `murphy` |
 | Onyx BOOX Picco | ESP32-S3, 8 MB PSRAM | SSD1677 or SSD2677 (the driver probes), 800x480 | TMA525C touch, Power, Up, Down, slide switch, tilt sensor | `picco`, `picco_stock` |
+| Metalio E-Ink4 Plus | ESP32-S31, 16 MB PSRAM | 4.7" 1216x684 parallel EPDiy | FT6336U touch, capacitive Home/bezel keys, Vol Up/Down, BOOT/Confirm, expander Power | `metalio_eink4_plus` |
 
 X3 and X4 share one binary and are told apart at boot (`HalGPIO::begin()`,
 `BoardConfig::selectDevice()`). The release env names are in
@@ -297,6 +298,34 @@ The stock boot chain: the stock `app` (ota_0) normally runs. Blank otadata makes
 offers an SD-card install of `/update/firmware.bin` and a Restart that selects the app again. A full stock image can
 only come from a dump of the unit itself: Onyx's firmware cannot be downloaded anywhere. Take one before the first
 install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); restore with `write-flash 0x0`.
+
+## Metalio E-Ink4 Plus
+
+Profile `METALIO_EINK4_PLUS` in the SDK (`MetalioEInk4PlusBoard`), an ESP32-S31 with 16 MB octal PSRAM and a 4.7"
+1216x684 portrait parallel panel driven by EPDiy. Built with pioarduino 6.2.0 and `platform-espressif32` 61.04.00-RC1
+(Arduino-ESP32 4.0 RC1 / ESP-IDF 6.1). Because the app slot in `partitions_metalio_plus.csv` is 5 MiB,
+`CP_COMPACT_BUILTIN_FONTS=1` compiles only the 14 pt and 18 pt reader masters and scales the remaining sizes.
+
+- **Keys and haptics:** BOOT (GPIO61) is Confirm; side volume keys are Up and Down; capacitive bezel keys provide Home
+  (Back on tap, Go Home by default on hold) and Left/Right page keys; Power is read through the TCA9555 I/O expander
+  (short press defaults to Go Home, hold to Sleep). A vibration motor on TCA9555 P0.3 is driven via `HapticManager`
+  and gated on `HalCapabilities::hasHaptics()`.
+- **I2C and board glue:** FT6336U touch (0x38), BQ27220 gauge (0x55), CX25601N charger (0x6B), PCF8563 RTC (0x51),
+  SC7A20H IMU (0x19), TPS65185 PMIC, and TCA9555 expander share SDA0/SCL1. `HalBoardSupport::begin()` enables the SDK's
+  `freeink::I2cBusLock` and adopts its recursive mutex into `HalI2cBus`.
+- **Frontlight and SD:** 2 kHz / 14-bit PWM frontlight (GPIO6/GPIO7, 10% duty cap, constant-luminance CCT mixing) and
+  4-bit native SDMMC.
+- **Sleep, wake, and CPU clock:** `board_build.f_cpu = 320000000L` sets the 320 MHz clock EPDiy requires at boot
+  before PSRAM is in use. Light sleep is disabled in `HalBoardSupport::allowsLightSleep()` because the S31 RC toolchain
+  can corrupt PSRAM on wake. On deep sleep, `HalBoardSupport::enterDeepSleep()` arms the TCA9555 interrupt; on wake,
+  `HalBoardSupport::earlyBoot()` probes the Power key before `holdPowerRails()` so spurious expander wakes return to
+  sleep immediately without running the 300 ms touch reset.
+- **NVS, Wi-Fi, and ROM symbols:** `HalBoardSupport.cpp` wraps `nvs_flash_init`/`nvs_open` onto the private `witch_nvs`
+  partition, keeps Wi-Fi driver settings in RAM (`nvs_enable = false`), and runs software PBKDF2 (`__wrap_esp_fast_psk`)
+  on a dedicated 6 KB task stack. `lib/TJpgDec/src/tjpgd.h` renames `jd_prepare` and `jd_decomp` to avoid colliding
+  with ESP32-S31 ROM symbols of a different ABI.
+- **OTA slots:** `ota_boot::idleAppPartition()` compares `esp_app_desc_t::project_name` on the inactive slot and returns
+  null when it holds a different firmware, keeping OTA active when both slots run Witch Reader.
 
 ## Gotchas
 

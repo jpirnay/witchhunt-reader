@@ -179,6 +179,9 @@ jobs:
           - env: picco
             label: BOOX Picco
             asset: firmware-picco.bin
+          - env: metalio_eink4_plus
+            label: Metalio E-Ink4 Plus
+            asset: firmware-metalio.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -206,7 +209,12 @@ jobs:
         run: npm ci
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+        run: |
+          if [ "${{ matrix.env }}" = "metalio_eink4_plus" ]; then
+            uv pip install --system -U "pioarduino==6.2.0"
+          else
+            uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+          fi
 
       # Keyed per env: the C3 and S3 legs pull different toolchain packages, so
       # a shared key would have the two legs overwriting each other's cache.
@@ -218,6 +226,7 @@ jobs:
           restore-keys: pio-v2-${{ runner.os }}-${{ matrix.env }}-
 
       - name: Pin pioarduino core inside the platform penv
+        if: matrix.env != 'metalio_eink4_plus'
         run: |
           set -euo pipefail
           # Envs with custom_sdkconfig / custom_component_remove (every C3 env, via
