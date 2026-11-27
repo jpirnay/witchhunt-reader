@@ -135,7 +135,7 @@ comes back dead until the cable is replugged.
 
 ## Build requirements
 
-A board opts in with `-DFREEINK_CAP_USB_MSC=1` in its own env. Two constraints
+A board opts in with `-DFREEINK_CAP_USB_MSC=1` in its own env. Three constraints
 come with it:
 
 - **The env must extend `base`, not `firmware_tuned`.** Anything that sets
@@ -148,6 +148,11 @@ come with it:
   `SDCardManager/inject_build_flags.py` turns it on automatically whenever
   `FREEINK_CAP_USB_MSC` is set, so no env has to remember — and boards that never
   asked for USB Drive keep the non-virtual `SdSpiCard` and pay nothing.
+- **Its board section interpolates `[usb_msc]`** (`platformio.ini`): the link then
+  takes TinyUSB built for device MSC and CDC only in place of the prebuilt
+  `libarduino_tinyusb.a`, about 25 KB less static internal RAM. A board that sets
+  `FREEINK_CAP_USB_MSC` without it still works but carries the USB host stack and
+  the unused classes. `docs/tinyusb-build.md` has the details.
 
 ## What is new here
 
