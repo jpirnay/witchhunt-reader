@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_sntp.h>
 
 #include "HttpDownloader.h"
 #include "SilentRestart.h"
@@ -24,6 +25,9 @@ uint32_t bootLargest = 0;
 // Wi-Fi never started (Arduino WiFiGeneric.cpp, getMode() and espWiFiStop()), so a bare esp_wifi_stop() still reads STA
 // and is torn down here, and a radio already off skips wifiOff()'s 200 ms of delays.
 void radioOff() {
+  // SNTP whether or not the radio is still up: a site that turned the radio off some other way than wifiOff() would
+  // leave the client running across the exit (HalClock::syncNtp()'s fallback stays enabled after a success).
+  if (esp_sntp_enabled()) esp_sntp_stop();
   const wifi_mode_t mode = WiFi.getMode();
   if (mode == WIFI_MODE_NULL) return;
   if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) WiFi.softAPdisconnect(true);
