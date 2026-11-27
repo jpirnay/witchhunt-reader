@@ -1,9 +1,9 @@
 # BLE keyboards and page turners
 
-Status: **measured on the C3 at build time, not started.** A Bluetooth LE page turner serves reading; typing into the
+Status: **measured on the C3 at build time for both of Espressif's controllers, not started.** A Bluetooth LE page turner serves reading; typing into the
 existing text fields is marginal, and a text editor is out of scope (`SCOPE.md`). The measurements, the reasoning and
 the instructions to repeat them are in the spike's handover:
-[`docs/ble-keyboards-handover-2026-11-27.md` on `chore/ble-c3-spike`](https://github.com/jpirnay/witchhunt-reader/blob/80c2076f0505e96daa659393b50b4053b72f8c45/docs/ble-keyboards-handover-2026-11-27.md).
+[`docs/ble-keyboards-handover-2026-11-27.md` on `chore/ble-c3-spike`](https://github.com/jpirnay/witchhunt-reader/blob/3b26614c1a46dfef4b95a6ff29d88b456af52c19/docs/ble-keyboards-handover-2026-11-27.md).
 That branch is a measurement spike and is never merged. Related: [font-flash.md](font-flash.md) ("The C3 sdkconfig
 trim"), which needs the same core rebuild as the supported way to the flash-only controller.
 
@@ -18,24 +18,31 @@ trim"), which needs the same core rebuild as the supported way to the flash-only
   is linked, BLE on or off. Neither the linker script nor the memory release can give it back (memory protection is
   locked; `esp_bt_controller_mem_release()` frees only data).
 - Espressif's flash-only controller (`libbtdm_app_flash.a`) has 1.5 KB of IRAM, but it replaces the ROM's link layer:
-  up to about 301 KB of flash. Its interrupt is held off during flash writes, and the prebuilt core leaves flash
-  auto-suspend off.
-- Configuration cannot trim the controller to HID only: what links is fixed by one constant patch table inside the
-  library.
+  243,867 B of it links (measured), against 104,672 B of the ROM-assisted one. It can be swapped in at link time
+  without a core rebuild (handover, "Option B"). Its interrupt is held off during flash writes, and the prebuilt core
+  leaves flash auto-suspend off.
+- Configuration cannot trim the controller to HID only, and a hand-built patch table would not either: most of the
+  library's dispatch table already resolves to ROM, and the advertising code comes in through the library's own code
+  paths.
 
-**What was tried.** The SDK's `BleKeyboardHost` on NimBLE-Arduino 2.5.1, sized like upstream's tuned C3 build, on
-the prebuilt core (`env:default`, 2026-11-27): `Flash:` +239,026 B (158,869 B left in the app slot), `RAM:` +8,784 B,
-`.iram0.text` +23,466 B. The host's share is about 105 KB of flash (NimBLE's C host and its C++ wrapper), the only
-part a hand-written keypress-only host could shrink. The handover's table compares five designs. They range from
-about +135 KB of flash with 25 KB less heap (ROM controller, custom host) to about +335 KB of flash with about 5 KB
-less heap (flash-only controller, custom host). The flash-only controller with NimBLE leaves no room in practice.
+**What was tried.** The SDK's `BleKeyboardHost` on NimBLE-Arduino 2.5.1, sized like upstream's tuned C3 build
+(`env:default`, 2026-11-27), linked with each controller; the boot heap is predicted from the map:
+
+| Build | `Flash:` vs master | Left in the app slot | `.iram0.text` | Boot heap vs master |
+|---|---|---|---|---|
+| ROM-assisted controller + NimBLE | +239,026 B | 158,869 B | +23,466 B | about −31.8 KB |
+| Flash-only controller + NimBLE | +379,610 B | 18,285 B | +1,514 B | about −10.4 KB |
+
+The host's share is about 105 KB of flash (NimBLE's C host and its C++ wrapper), the only part a hand-written
+keypress-only host could shrink. Derived from these builds, with a custom host estimated at 15-20 KB: about +140 KB of
+flash and about 25 KB less heap with the ROM-assisted controller, about +280 KB and about 4 KB less heap with the
+flash-only one.
 
 **Next step.**
-1. Link the flash-only controller into the spike. The prebuilt `bt.c` takes it with nine empty
-   `ble_*_funcs_reset` stubs and an `esp_intr_alloc` wrapper that clears `ESP_INTR_FLAG_IRAM`, with no core rebuild
-   (handover, "Option B"). Record the linked size.
-2. Take the X4 heap readings the handover lists (`CMD:BLE` on the spike, for both controllers).
-3. Decide the trade: heap at every boot against flash and font-cache MMU pages.
+1. On the X4: the heap readings and run checks the handover lists (`CMD:BLE` on the spike, for both controllers). With
+   the flash-only controller, also a page turner kept connected through flash writes, and Wi-Fi alongside it.
+2. Decide the trade: heap at every boot against flash and font-cache MMU pages (the C3 sdkconfig trim would buy flash
+   back).
 
 ## Any BLE build: gate the controller's memory at boot
 
@@ -44,7 +51,8 @@ less heap (flash-only controller, custom host). The flash-only controller with N
 `esp32-hal-alloc-ble-mem.h`, whose constructor makes `bleInUse()` true, so linking it keeps that memory from boot for
 every user. `bleInUse()` is weak: a strong definition that reads the BLE setting from NVS (initialised just before
 the call) makes BLE off cost nothing there; switching BLE on then needs a reboot. The spike's `src/BleSpike.cpp`
-has this.
+has this. The flash-only controller needs it too: it still uses the ROM-reserved DRAM (`r_ip_funcs_p`, bound by
+`esp32c3.rom.ld`).
 
 **Next step.** Part of whichever design lands, on every board.
 
