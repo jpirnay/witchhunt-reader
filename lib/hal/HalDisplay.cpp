@@ -315,6 +315,10 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
 
 void HalDisplay::powerOffPanelBetweenFrames() {
   HalSpiBus::Lock spiLock;
+  if (HalCapabilities::panelIdlesThroughControllerSleep()) {
+    einkDisplay.controllerIdle();  // waits for a refresh in flight; skips a pending gray base
+    return;
+  }
   einkDisplay.powerOffBetweenFrames();
 }
 

@@ -51,6 +51,8 @@ BOARDS = {
     "lilygo": ("firmware-lilygo.bin", "full-install-lilygo.bin"),
     "murphy": ("firmware-murphy.bin", "full-install-murphy.bin"),
     "picco": ("firmware-picco.bin", "full-install-picco.bin"),
+    "x4c": ("firmware-x4c.bin", "full-install-x4c.bin"),
+    "eego_a4": ("firmware-eego_a4.bin", "full-install-eego_a4.bin"),
 }
 BOARD_ASSETS = {name for pair in BOARDS.values() for name in pair}
 OTADATA = (0xE000, 0x10000)

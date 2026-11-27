@@ -144,20 +144,18 @@ jobs:
           key: ${{ steps.cppcheck-results.outputs.key }}-${{ github.sha }}
 
   build:
-    # The C3 boards (X3/X4), the X4 Pro, the S3 LilyGo T5S3 and 
-    # the S3 Murphy are separate binaries built from different toolchains, 
-    # so each gets its own leg.
-    # fail-fast is off so a break on one board still reports the others' result.
+    # Every board is its own binary (the C3 X3/X4 pair shares one), so each
+    # gets its own leg. fail-fast is off so a break on one board still reports
+    # the others' result.
     #
     # Asset names match what the firmware's own OTA check asks GitHub for (see
     # src/network/FirmwareBoardTag.h): plain firmware.bin for the combined C3
-    # X3/X4 binary, firmware-<board>.bin for every other board.
+    # X3/X4 binary, firmware-<board>.bin for every other board. They must match
+    # the list in pr-firmware-links.yml.
     #
-    # x4pro builds here for CI coverage and PR test artifacts only -- there is
-    # no x4pro_gh_release/x4pro_gh_release_rc env yet, so it is deliberately
-    # absent from release.yml/release_candidate.yml. Add those only once the
-    # board is validated enough to publish: doing so makes the binary eligible
-    # for the firmware's own OTA update check on every X4 Pro in the field.
+    # A board's release envs go into release.yml/release_candidate.yml once it
+    # is validated enough to publish (see the note there), or as an
+    # experimental leg.
     name: Build (${{ matrix.label }})
     runs-on: ubuntu-latest
     strategy:
@@ -165,20 +163,40 @@ jobs:
       matrix:
         include:
           - env: default
+            mcu: c3
             label: X3/X4
             asset: firmware.bin
           - env: x4pro
+            mcu: s3
             label: X4 Pro
             asset: firmware-x4pro.bin
           - env: lilygo_t5s3
+            mcu: s3
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
           - env: murphy
+            mcu: s3
             label: Murphy M3
             asset: firmware-murphy.bin
           - env: picco
+            mcu: s3
             label: BOOX Picco
             asset: firmware-picco.bin
+          # Experimental boards (platformio.ini, "EXPERIMENTAL BOARDS"): built
+          # on every PR like the others, so a change that breaks them fails
+          # here rather than in a release, where their legs may fail.
+          - env: x4c
+            mcu: s3
+            label: X4 Classic (experimental)
+            asset: firmware-x4c.bin
+          - env: sticky
+            mcu: s3
+            label: Sticky (experimental)
+            asset: firmware-sticky.bin
+          - env: eego_a4
+            mcu: s3
+            label: EEGO A4 (experimental)
+            asset: firmware-eego_a4.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -208,14 +226,20 @@ jobs:
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
-      # Keyed per env: the C3 and S3 legs pull different toolchain packages, so
-      # a shared key would have the two legs overwriting each other's cache.
+      # Keyed per MCU family, not per env: the C3 and S3 legs pull different
+      # toolchain packages, but every S3 env pulls the same ones (board-specific
+      # libraries land in .pio/libdeps, which is not cached). One entry per
+      # family keeps the repo's 10 GiB cache from evicting itself: an entry is
+      # ~2 GiB, and five per-env entries already took 9.8 GiB. Parallel S3 legs
+      # on a miss all build it; one saves, the others log "another job may be
+      # creating this cache" and go on. The dev and release envs of a family
+      # share the entry too, so a release build starts warm from master's.
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-v2-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-v2-${{ runner.os }}-${{ matrix.env }}-
+          key: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-
 
       - name: Pin pioarduino core inside the platform penv
         run: |

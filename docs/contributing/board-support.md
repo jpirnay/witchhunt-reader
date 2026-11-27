@@ -13,6 +13,9 @@ active profile through `BoardConfig::ACTIVE` and does not hardcode pins.
 | Murphy M3 | ESP32-S3, 8 MB PSRAM | UC8253, 416x240 | CHSC6x touch, Up, Down, Confirm | `murphy` |
 | Onyx BOOX Picco | ESP32-S3, 8 MB PSRAM | SSD1677 or SSD2677 (the driver probes), 800x480 | TMA525C touch, Power, Up, Down, slide switch, tilt sensor | `picco`, `picco_stock` |
 
+Three more boards are built as experimental, never run on by this project: the Xteink X4 Classic, the Seeed
+reTerminal Sticky and the EEGO Reader A4 ([Experimental boards](#experimental-boards)).
+
 X3 and X4 share one binary and are told apart at boot (`HalGPIO::begin()`,
 `BoardConfig::selectDevice()`). The release env names are in
 [Getting Started](./getting-started.md#build). Pin maps and hardware evidence live upstream; see
@@ -78,8 +81,9 @@ SDK, `FreeInkDisplay::PanelSel`, is in [future work](../future_work/display-and-
   sets `CP_TOUCH_UI=0` and the RISC-V wolfSSL assembly (`WOLFSSL_SP_RISCV32`, which the Xtensa
   assembler rejects); `[s3]` uses `WOLFSSL_SP_SMALL`. `BoardConfig.h` stops the build with
   `#error` if the selected devices span two MCU families, so an env takes exactly one of these.
-- `[x4pro_board]` or `[lilygo_board]`: the board, shared by its dev and release envs. The envs
-  add only the version string and log level.
+- `[x4pro_board]`, `[lilygo_board]` and the other `[<board>_board]` sections: the board, shared by its dev and
+  release envs. The envs add only the version string and log level. The experimental boards' sections sit in a block
+  of their own at the end of the file.
 
 The S3 board sections extend `base` and never `firmware_tuned`; the comment on `[firmware_tuned]`
 explains why (USB mass storage needs the prebuilt TinyUSB component).
@@ -297,6 +301,48 @@ The stock boot chain: the stock `app` (ota_0) normally runs. Blank otadata makes
 offers an SD-card install of `/update/firmware.bin` and a Restart that selects the app again. A full stock image can
 only come from a dump of the unit itself: Onyx's firmware cannot be downloaded anywhere. Take one before the first
 install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); restore with `write-flash 0x0`.
+
+## Experimental boards
+
+Three boards are built and published although nobody on this project has run Witch Reader on one: users asked for
+binaries. Their profiles come from the SDK (vendor sources and stock-firmware dumps), and upstream CrossPoint ships
+all three. Everything above the SDK is ours and untested on them.
+
+| Board | Envs | Board tag, release files | Added upstream |
+|---|---|---|---|
+| Xteink X4 Classic: the X4 Pro's S3 board and panel stack without touch or light, seven keys | `x4c`, `x4c_gh_release[_rc]` | `x4c`: `firmware-x4c.bin`, `full-install-x4c.bin` | #3279 (Justin Mitchell) |
+| Seeed reTerminal Sticky: S3, SSD1677 800x480, GT911 touch, SD on the panel's SPI bus | `sticky`, `sticky_gh_release[_rc]` | `sticky`: `firmware-sticky.bin`, `full-install-sticky.bin` | #2481 (Justin Mitchell) |
+| EEGO Reader A4: S3, UC8279C 768x552, GSLX680 touch, Up, Down and Power keys | `eego_a4`, `eego_a4_gh_release[_rc]` | `eego_a4`: `firmware-eego_a4.bin`, `full-install-eego_a4.bin` | #3887 (Uri Tauber) |
+
+The board tags are upstream's, so an upstream image and ours can replace each other on a unit. What "experimental"
+means in practice:
+
+- CI builds the dev envs on every pull request, and a break there fails the PR like any other board.
+- `release.yml` and `release_candidate.yml` publish them with `continue-on-error`, so a failing leg leaves its images
+  out instead of stopping the release. Only a unit someone flashed with one of our builds asks this repository for
+  updates, so the OTA reaches only the people who chose to install one.
+- They are marked wherever a user picks a binary: the README, the release notes, the web flasher (`experimental` in
+  `flasher/lib.js` labels the board and shows a warning), and System Information on the device ("Board support:
+  Experimental", from `-DCROSSPOINT_EXPERIMENTAL_BOARD=1` in the board's section of `platformio.ini`).
+- The flasher does not list the Sticky: its USB port is a WCH serial bridge, and the port picker shows Espressif's
+  vendor ID only. The README gives the esptool commands.
+
+What each board needed in the firmware, beyond its envs:
+
+- **X4 Classic:** `-DCP_TOUCH_UI=0`. It is the first S3 board without a digitiser, and `MappedInputManager.cpp`'s
+  static assert holds that flag to `FREEINK_CAP_TOUCH`. Up is GPIO0, a boot strap; `upKeyIsBootStrap()` already moves
+  the recovery combo to Down.
+- **Sticky:** nothing. Logs reach the bridge through the ROM console (`FREEINK_LOG_TRANSPORT` in the SDK); the latches
+  are held and the switched rails cut in sleep by the code every board runs. There is no USB Drive (`FREEINK_CAP_USB_MSC`
+  stays off), and the serial test API reads the native USB port, so it hears nothing. The flash size is not
+  documented; the env takes the 16 MB layout upstream ships.
+- **EEGO A4:** the Power key is active-high behind an external pull-down, so the raw reads, the pull and the deep-sleep
+  wake level follow the profile (`HalGPIO::powerPinPressed()`, `configurePowerPin()`, `powerPinActiveHigh()`); every
+  other board is active-low, and reads exactly as before. The panel powers down when idle through `controllerIdle()`
+  (`HalCapabilities::panelIdlesThroughControllerSleep()`), because upstream found the glass fuzzes while powered. The
+  profile's Wi-Fi TX cap (15 dBm) is applied on every STA and AP start, ported from upstream #3993.
+
+What is known to be missing, and what graduating a board takes: [future work](../future_work/experimental-boards.md).
 
 ## Gotchas
 

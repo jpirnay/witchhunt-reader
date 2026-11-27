@@ -73,30 +73,58 @@ jobs:
     name: Build (${{ matrix.label }})
     needs: prepare
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - env: gh_release_rc
+            mcu: c3
             label: X3/X4
             asset: firmware.bin
             full: full-install-x3x4.bin
           - env: x4pro_gh_release_rc
+            mcu: s3
             label: X4 Pro
             asset: firmware-x4pro.bin
             full: full-install-x4pro.bin
           - env: lilygo_gh_release_rc
+            mcu: s3
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
             full: full-install-lilygo.bin
           - env: murphy_gh_release_rc
+            mcu: s3
             label: Murphy M3
             asset: firmware-murphy.bin
             full: full-install-murphy.bin
           - env: picco_gh_release_rc
+            mcu: s3
             label: BOOX Picco
             asset: firmware-picco.bin
             full: full-install-picco.bin
+          # Experimental boards: published, marked experimental in the release
+          # notes, README and web flasher, but never run here. The job's
+          # continue-on-error keeps a failing leg from holding back the supported boards;
+          # its images are then missing from the release.
+          - env: x4c_gh_release_rc
+            mcu: s3
+            label: X4 Classic (experimental)
+            asset: firmware-x4c.bin
+            full: full-install-x4c.bin
+            experimental: true
+          - env: sticky_gh_release_rc
+            mcu: s3
+            label: Sticky (experimental)
+            asset: firmware-sticky.bin
+            full: full-install-sticky.bin
+            experimental: true
+          - env: eego_a4_gh_release_rc
+            mcu: s3
+            label: EEGO A4 (experimental)
+            asset: firmware-eego_a4.bin
+            full: full-install-eego_a4.bin
+            experimental: true
     steps:
       - uses: actions/checkout@v6
         with:
@@ -127,14 +155,20 @@ jobs:
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
-      # Keyed per env: the C3 and S3 legs pull different toolchain packages, so
-      # a shared key would have the two legs overwriting each other's cache.
+      # Keyed per MCU family, not per env: the C3 and S3 legs pull different
+      # toolchain packages, but every S3 env pulls the same ones (board-specific
+      # libraries land in .pio/libdeps, which is not cached). One entry per
+      # family keeps the repo's 10 GiB cache from evicting itself: an entry is
+      # ~2 GiB, and five per-env entries already took 9.8 GiB. Parallel S3 legs
+      # on a miss all build it; one saves, the others log "another job may be
+      # creating this cache" and go on. The dev and release envs of a family
+      # share the entry too, so a release build starts warm from master's.
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-v2-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-v2-${{ runner.os }}-${{ matrix.env }}-
+          key: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-v2-${{ runner.os }}-${{ matrix.mcu }}-
 
       - name: Pin pioarduino core inside the platform penv
         run: |

@@ -427,7 +427,7 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   LOG_DBG("PWR", "startDeepSleep: isPressed=%d, rawPin=%d, keepClock=%d", gpio.isPressed(HalGPIO::BTN_POWER),
-          digitalRead(InputManager::POWER_BUTTON_PIN) == LOW, keepClockAlive);
+          HalGPIO::powerPinPressed(), keepClockAlive);
 
 #ifdef ENABLE_SERIAL_LOG
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
@@ -532,7 +532,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
   }
-  pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
+  HalGPIO::configurePowerPin();
   if (sleepStepHook_) sleepStepHook_(SleepStep::RailsConfigured, 0, false, gpio13IsBatteryLatch);
 
   // Now wait for the power button to be fully released before arming the wakeup
@@ -554,12 +554,16 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   // capability rather than on a board or device name: the C3 has no RTC IO mux
   // and uses the dedicated deep-sleep GPIO path, while the S3 wakes from EXT1
   // over its RTC GPIOs (the X4 Pro power key is GPIO3, which is RTC-capable).
-  // Both boards' power keys are active-LOW, matching the level used here.
+  // The level follows the key's polarity: LOW on every board but the EEGO A4, whose key
+  // idles LOW behind a pull-down and drives HIGH when pressed. Armed on LOW there, it
+  // would wake the instant it slept.
   constexpr uint64_t powerPinMask = 1ULL << InputManager::POWER_BUTTON_PIN;
 #if SOC_PM_SUPPORT_EXT1_WAKEUP
-  esp_sleep_enable_ext1_wakeup_io(powerPinMask, ESP_EXT1_WAKEUP_ANY_LOW);
+  esp_sleep_enable_ext1_wakeup_io(powerPinMask,
+                                  HalGPIO::powerPinActiveHigh() ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW);
 #elif SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
-  esp_deep_sleep_enable_gpio_wakeup(powerPinMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_enable_gpio_wakeup(
+      powerPinMask, HalGPIO::powerPinActiveHigh() ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW);
 #else
 #error "No deep-sleep wake source available for this target — add one before enabling this board."
 #endif

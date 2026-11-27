@@ -37,6 +37,7 @@
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <esp_private/esp_clk.h>
+#include <esp_wifi.h>
 #include <soc/rtc.h>
 
 #include <algorithm>
@@ -536,7 +537,7 @@ static unsigned long allowSleepAt = 0;
 //
 // Serviced by serviceBootPowerRelease(), defined below BootDiag::markPhase().
 static bool bootPowerReleasePending = false;
-static unsigned long bootPowerHighSince = 0;
+static unsigned long bootPowerReleasedSince = 0;
 
 static void logStartupMemory(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
@@ -593,10 +594,10 @@ static void serviceBootPowerRelease() {
   // reason it did — the 5 ms debounce is too short for mechanical release bounce.
   constexpr unsigned long RELEASE_STABLE_MS = 200;
   const unsigned long now = millis();
-  if (digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH) {
-    if (bootPowerHighSince == 0) bootPowerHighSince = now;
+  if (!HalGPIO::powerPinPressed()) {
+    if (bootPowerReleasedSince == 0) bootPowerReleasedSince = now;
   } else {
-    bootPowerHighSince = 0;
+    bootPowerReleasedSince = 0;
   }
   // Unconditional, including on the tick that clears the latch: drain() resets every FSM and
   // flushes the sampler's edge queue plus the pending press/release bits, so neither the boot
@@ -604,7 +605,7 @@ static void serviceBootPowerRelease() {
   // It also keeps gpio.wasPressed(BTN_POWER) false, which is what stops the hold-to-sleep
   // timer in loop() from ever starting on the wake press.
   buttonEventManager.drain();
-  if (bootPowerHighSince != 0 && now - bootPowerHighSince >= RELEASE_STABLE_MS) {
+  if (bootPowerReleasedSince != 0 && now - bootPowerReleasedSince >= RELEASE_STABLE_MS) {
     bootPowerReleasePending = false;
     // Stamped here rather than in setup(), so `rel` in the boot trace still reports how long
     // the user kept holding past the point the device was ready — it just no longer costs
@@ -754,7 +755,7 @@ static void sendSleepEventsThenSleep(const bool fromTimeout) {
 // needs pinned down.
 void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = BootDiag::SleepTrigger::PowerHold) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
-          gpio.isPressed(HalGPIO::BTN_POWER), digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
+          gpio.isPressed(HalGPIO::BTN_POWER), HalGPIO::powerPinPressed());
   // The web server activity releases BOTH framebuffers for WiFi heap
   // (releaseFrameBuffers() nulls the renderer's pointer). SleepActivity would
   // render the sleep screen into nullptr and crash, so reboot instead: setup()
@@ -897,7 +898,7 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   // light for the whole sleep-screen paint. No-op without a frontlight.
   Frontlight.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep (powerBtn isPressed=%d, rawPin=%d)", gpio.isPressed(HalGPIO::BTN_POWER),
-          digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
+          HalGPIO::powerPinPressed());
 
   powerManager.startDeepSleep(gpio, keepLpAlive);
 }
@@ -1510,6 +1511,22 @@ void setup() {
   HalI2cBus::ensureBusStarted();
   powerManager.begin();
   halTiltSensor.begin();
+
+  // The board's Wi-Fi TX-power ceiling (BoardProfile::wifiMaxTxPower, quarter-dBm): only the
+  // EEGO A4 sets one, 15 dBm, the cap its stock firmware applies. The IDF takes it only once
+  // Wi-Fi has started, so it is applied on every STA and AP start rather than at each place
+  // that brings Wi-Fi up. Compiled in only for a build whose board has a cap; the one build
+  // that holds two boards (X3 + X4) has none.
+  // Ported from crosspoint-reader/crosspoint-reader PR #3993
+  // ("fix: Add WiFi TX power limit configuration", Justin Mitchell).
+  if constexpr (BoardConfig::DEFAULT_DEVICE.wifiMaxTxPower != 0) {
+    const auto applyTxCap = [](arduino_event_id_t, arduino_event_info_t) {
+      const esp_err_t err = esp_wifi_set_max_tx_power(static_cast<int8_t>(BoardConfig::ACTIVE.wifiMaxTxPower));
+      if (err != ESP_OK) LOG_ERR("WIFI", "TX power cap failed: %d", err);
+    };
+    WiFi.onEvent(applyTxCap, ARDUINO_EVENT_WIFI_STA_START);
+    WiFi.onEvent(applyTxCap, ARDUINO_EVENT_WIFI_AP_START);
+  }
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
   BootDiag::markPhase(BootPhase::HwInit);
 
@@ -1558,7 +1575,7 @@ void setup() {
           HalGPIO::wakeVerdictName(BootDiag::wakeCheck().verdict), BootDiag::wakeCheck().decidedAtMs,
           BootDiag::wakeCheck().heldMs, BootDiag::wakeCheck().requiredMs);
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
-          digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
+          HalGPIO::powerPinPressed());
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
   // Re-log the boot-time heap integrity results now that serial is open. The three
   // probes bracket the boot phases: preCtors CORRUPT ⇒ IDF/Arduino SDK init;
@@ -1952,7 +1969,7 @@ void setup() {
   // Skip on silent reboot: the firmware triggered the restart, so the button isn't held.
   if (!isSilentReboot) {
     bootPowerReleasePending = true;
-    bootPowerHighSince = 0;
+    bootPowerReleasedSince = 0;
   }
   // All boot-time power-button handling (which drives inputMgr.update() directly)
   // is done — hand button sampling to the background sampler so presses are caught

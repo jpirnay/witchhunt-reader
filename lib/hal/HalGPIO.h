@@ -442,10 +442,23 @@ class HalGPIO {
     return samplerTaskHandle_ ? uxTaskGetStackHighWaterMark(samplerTaskHandle_) : 0;
   }
 
-  // Wait until the raw power-button GPIO reads HIGH (released) for a sustained period.
+  // The power key read raw, at the board profile's polarity (input.powerActiveHigh).
+  // Pressed reads LOW behind a pull-up on every board but the EEGO A4, whose key
+  // drives 3.3 V against a weak external pull-down. Raw, so it bypasses the
+  // InputManager debounce and works with the input sampler stopped, as the sleep
+  // path and the boot-time wake gate need.
+  static bool powerPinPressed();
+  // The pull that holds the power key at its idle level: up for an active-low key,
+  // down for an active-high one. An internal pull-up on the A4's key leaves the line
+  // mid-rail, reading pressed (the SDK's EEGO_A4 profile).
+  static void configurePowerPin();
+  // Whether a deep-sleep wake on the power key waits for a HIGH level.
+  static bool powerPinActiveHigh();
+
+  // Wait until the raw power-button GPIO reads released for a sustained period.
   // Uses the raw pin directly instead of the InputManager debounced state to avoid
   // the 5 ms debounce being fooled by mechanical switch bounce during release.
-  // Block until the raw power pin has read HIGH for 200 ms straight, or `timeoutMs`
+  // Block until the raw power pin has read released for 200 ms straight, or `timeoutMs`
   // elapses — whichever comes first. Returns how long it waited; compare against
   // `timeoutMs` to tell a clean release from a give-up. Bypasses the InputManager
   // debounce deliberately (5 ms is too short for 10-50 ms mechanical release bounce),

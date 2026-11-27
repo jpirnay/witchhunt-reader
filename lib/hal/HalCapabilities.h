@@ -250,20 +250,35 @@ inline bool clearsGhostsOnEveryScreen() {
 // is clean without it. Per board: the Picco's profile names its controller SSD1677, and the driver is chosen by board.
 inline bool halfRefreshFlashesBlack() { return BoardConfig::ACTIVE.board == BoardConfig::Board::Picco; }
 
+// The EEGO A4's UC8279C glass fuzzes and shows earlier screens while its controller stays powered: upstream
+// CrossPoint's finding (idleDisplayWhileAwake() in its main.cpp), and the stock firmware powers it down 500 ms after
+// each refresh. Not seen here: no A4 is on the desk. Its driver has no booster-only power-off, so
+// HalDisplay::powerOffPanelBetweenFrames() parks it through controllerIdle(): power-off and controller deep sleep,
+// and the next paint resets and re-initializes it (Uc8279cA4Driver). Keyed on the controller, which only this board
+// carries.
+inline bool panelIdlesThroughControllerSleep() {
+  return BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279C;
+}
+
 // The panel's booster is powered down once the device is idle, and again after each frame drawn
 // while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Both drivers
 // keep the booster up after a refresh unless the Sunlight Fading Fix asks for POF. Murphy's next
 // refresh resets and powers it up anyway; the X3's (UC8253, not the UC8279 run) powers up and keeps
 // its FAST, because the driver tells this power-off from a wake (Uc8253X3Driver::_idlePoweredOff).
+// The EEGO A4 needs it for the glass (panelIdlesThroughControllerSleep).
 inline bool powersPanelOffWhenIdle() {
-  return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3;
+  return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
+         panelIdlesThroughControllerSleep();
 }
 
 // How long after the last input the booster goes down (powersPanelOffWhenIdle). Murphy powers up
-// for every refresh anyway, so it goes down as soon as the loop idles. The X3's next refresh waits
+// for every refresh anyway, so it goes down as soon as the loop idles, and so does the EEGO A4, whose
+// stock firmware waits 500 ms (the loop idles after IDLE_LIGHT_SLEEP_MS, 1 s). The X3's next refresh waits
 // for the power-up, 128 ms measured 2026-11-20, which would land on nearly every page turn after a
 // second of reading: it waits past a page's reading time, so only a pause pays it.
-inline unsigned long panelIdlePowerOffAfterMs() { return BoardConfig::isMurphyM3() ? 0 : 120000; }
+inline unsigned long panelIdlePowerOffAfterMs() {
+  return (BoardConfig::isMurphyM3() || panelIdlesThroughControllerSleep()) ? 0 : 120000;
+}
 
 // The 4-level image dither's table for this board's panel (quantizeGray4() in BitmapHelpers.h, copied there by
 // setupDisplayAndFonts()): the three thresholds, and for each level the value fed back to the diffuser, the sRGB gray
@@ -465,6 +480,10 @@ inline const char* boardDisplayName(BoardConfig::Board board) {
       return "X3";
     case BoardConfig::Board::XteinkX4Pro:
       return "X4 Pro";
+    case BoardConfig::Board::XteinkX4Classic:
+      return "X4 Classic";
+    case BoardConfig::Board::EegoA4:
+      return "EEGO A4";
     case BoardConfig::Board::M5StackPaperColor:
       return "M5Paper Color";
     case BoardConfig::Board::MurphyM3:

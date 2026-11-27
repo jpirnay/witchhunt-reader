@@ -210,15 +210,27 @@ function renderBoards() {
     input.checked = b === state.board;
     input.addEventListener("change", () => {
       state.board = b;
+      renderBoardNote();
       if (state.manifest) renderReleases();
       refresh();
     });
     label.append(input, " ", b.label);
     const small = document.createElement("small");
-    small.textContent = b.chip;
+    small.textContent = b.experimental ? `${b.chip}, experimental` : b.chip;
     label.append(small);
     box.append(label);
   }
+  renderBoardNote();
+}
+
+function renderBoardNote() {
+  const box = $("board-note");
+  box.replaceChildren();
+  if (!state.board.experimental) return;
+  note(box, "warn", `Experimental: Witch Reader is built for the ${state.board.label}, but has not been run on ` +
+    "one by its developers. It may not start, sleep or wake properly. Back up the whole flash first (step 2), " +
+    "so you can go back, and ", link("https://github.com/jpirnay/witchhunt-reader/issues", "report"),
+    " what works and what does not.");
 }
 
 const boardImages = () => (state.manifest && state.manifest.boards[state.board.id]) || { app: null, full: null };

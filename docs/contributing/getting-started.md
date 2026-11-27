@@ -78,6 +78,11 @@ Environments in `platformio.ini`:
 | X3 and X4 (ESP32-C3, one binary) | `default` | `gh_release` | `gh_release_rc` |
 | X4 Pro (ESP32-S3) | `x4pro` | `x4pro_gh_release` | `x4pro_gh_release_rc` |
 | LilyGo T5S3 (ESP32-S3) | `lilygo_t5s3` | `lilygo_gh_release` | `lilygo_gh_release_rc` |
+| Murphy M3 (ESP32-S3) | `murphy` | `murphy_gh_release` | `murphy_gh_release_rc` |
+| BOOX Picco (ESP32-S3) | `picco` (`picco_stock` for Onyx's partition table) | `picco_gh_release` | `picco_gh_release_rc` |
+| X4 Classic (ESP32-S3, experimental) | `x4c` | `x4c_gh_release` | `x4c_gh_release_rc` |
+| Seeed reTerminal Sticky (ESP32-S3, experimental) | `sticky` | `sticky_gh_release` | `sticky_gh_release_rc` |
+| EEGO Reader A4 (ESP32-S3, experimental) | `eego_a4` | `eego_a4_gh_release` | `eego_a4_gh_release_rc` |
 
 Five more C3 environments are for measurement, not for daily use: `slim` is a release-style build with serial logging compiled out, and `bench` and `bench_font` flash a standalone benchmark that prints timings over serial (no SD card needed). `bench_glyph_store` is a self-test of the TTF glyph store on the real `spiffs` partition; it erases the `.cpfont` flash cache, which the reader copies back from the SD card the next time it needs it. `bench_ttf_raster` renders every glyph of Source Serif 4 Caption Regular (the built-in Serif's source) with the TTF engine and checks the output against the host tests'..
 
