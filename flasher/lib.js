@@ -19,13 +19,17 @@ export const CHIP_IDS = { "ESP32-C3": 5, "ESP32-S3": 9 };
 // The boards the page offers. `chip` is esptool-js's CHIP_NAME; `reset` is how the device leaves
 // the ROM loader after a write (flasher.js, restart()): the C3 boards by the USB Serial/JTAG RTS
 // reset, the S3 boards by the RTC watchdog, since an RTS reset has left our S3 boards in the ROM
-// loader.
+// loader. `experimental`: built for the board but never run on one by this project
+// (platformio.ini, "EXPERIMENTAL BOARDS"); the page says so. The experimental Seeed Sticky is not
+// listed: its USB port is a WCH serial bridge, which the port picker's Espressif filter hides.
 export const BOARDS = [
   { id: "x3x4", label: "Xteink X3 / X4", chip: "ESP32-C3", reset: "hard" },
   { id: "x4pro", label: "Xteink X4 Pro", chip: "ESP32-S3", reset: "watchdog" },
   { id: "lilygo", label: "LilyGo T5 S3", chip: "ESP32-S3", reset: "watchdog" },
   { id: "murphy", label: "Murphy M3", chip: "ESP32-S3", reset: "watchdog" },
   { id: "picco", label: "BOOX Picco", chip: "ESP32-S3", reset: "watchdog" },
+  { id: "x4c", label: "Xteink X4 Classic", chip: "ESP32-S3", reset: "watchdog", experimental: true },
+  { id: "eego_a4", label: "EEGO Reader A4", chip: "ESP32-S3", reset: "watchdog", experimental: true },
 ];
 
 const u16 = (b, o) => b[o] | (b[o + 1] << 8);
