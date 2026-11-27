@@ -1,6 +1,7 @@
 #include "NetworkMemoryTrim.h"
 
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
@@ -32,6 +33,14 @@ void releaseMemoryForDownload(const GfxRenderer& renderer, const char* logTag) {
   const size_t freeBefore = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
   const size_t largestBefore = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
   trimMemoryForNetworkSession(renderer, logTag);
+  // Where a Wi-Fi session can end without a restart, the screens below come back in this boot, so their rows stay, and
+  // so does a buried reader's SD font. Nothing would rebuild them; whether the heap left is enough is what
+  // wifi_session::end() measures at the exit.
+  if (!HalCapabilities::restartsAfterWifiSession()) {
+    LOG_DBG(logTag, "Kept the screens below for the download: free %u B, largest block %u B",
+            static_cast<unsigned>(freeBefore), static_cast<unsigned>(largestBefore));
+    return;
+  }
   // A loaded SD font: intervals, kern and ligature tables, up to ~60 KB. Usually already gone,
   // since leaving the reader unloads it.
   unloadSdFontIfLoaded();
