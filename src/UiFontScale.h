@@ -49,8 +49,8 @@ inline constexpr Step STEPS[] = {
 };
 #else
 inline constexpr Step STEPS[] = {
-    {23, 25, 30},  // DEFAULT: notosans_8,  inter_ui_10, inter_ui_12
-    {25, 30, 35},  // LARGE:   inter_ui_10, inter_ui_12, inter_ui_14
+    {PanelMetrics::LARGE ? 30 : 23, PanelMetrics::LARGE ? 30 : 25, PanelMetrics::LARGE ? 35 : 30},
+    {PanelMetrics::LARGE ? 30 : 25, PanelMetrics::LARGE ? 35 : 30, 35},
 };
 #endif
 inline constexpr size_t STEP_COUNT = std::size(STEPS);

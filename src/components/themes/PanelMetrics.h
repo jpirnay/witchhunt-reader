@@ -1,5 +1,7 @@
 #pragma once
 
+#include <BoardConfig.h>
+
 // The theme metric tables are tuned for panels with a short side of 480 px or more. On Murphy's
 // 240 px the header, tab bar and spacing alone took 35 % of the height, so a compact panel caps
 // them. This is the one place that says which build is compact: BaseTheme.h's forPanel() applies
@@ -24,5 +26,18 @@ constexpr int capped(const int tuned, const int limit) { return COMPACT && tuned
 
 // A compact panel held sideways: too short for a stack that fits it upright.
 constexpr bool isShort(const int contentHeight) { return COMPACT && contentHeight < 300; }
+
+// Panels 4.7" or larger (960x540 T5S3, 1216x684 Metalio) need larger touch targets and spacing.
+#if defined(CPPCHECK_ANALYSIS)
+extern const bool LARGE;
+#elif defined(FREEINK_MCU_C3)
+inline constexpr bool LARGE = false;
+#else
+inline constexpr bool LARGE =
+    (BoardConfig::DEFAULT_DEVICE.displayWidth >= 960 && BoardConfig::DEFAULT_DEVICE.displayHeight >= 540) ||
+    (BoardConfig::DEFAULT_DEVICE.displayHeight >= 960 && BoardConfig::DEFAULT_DEVICE.displayWidth >= 540);
+#endif
+
+constexpr int enlarged(const int tuned, const int floor) { return LARGE && tuned < floor ? floor : tuned; }
 
 }  // namespace PanelMetrics

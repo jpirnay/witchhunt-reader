@@ -100,16 +100,17 @@ struct ThemeMetrics {
 // Sized for 240 px and Murphy's fonts: a body line is 20 px, a title line 25, a small line 17.
 constexpr ThemeMetrics forPanel(ThemeMetrics m) {
   using PanelMetrics::capped;
+  using PanelMetrics::enlarged;
   m.batteryBarHeight = capped(m.batteryBarHeight, 20);
   m.headerHeight = capped(m.headerHeight, 52);  // Lyra: the bar, its 3 px gap, a title line, the rule
   m.verticalSpacing = capped(m.verticalSpacing, 6);
-  m.contentSidePadding = capped(m.contentSidePadding, 8);
-  m.listRowHeight = capped(m.listRowHeight, 30);
-  m.listWithSubtitleRowHeight = capped(m.listWithSubtitleRowHeight, 60);  // a title and two small lines
-  m.menuRowHeight = capped(m.menuRowHeight, 36);
-  m.menuSpacing = capped(m.menuSpacing, 4);
-  m.tabBarHeight = capped(m.tabBarHeight, 30);
-  m.homeTopPadding = capped(m.homeTopPadding, 28);  // clear of the battery line
+  m.contentSidePadding = enlarged(capped(m.contentSidePadding, 8), 28);
+  m.listRowHeight = enlarged(capped(m.listRowHeight, 30), 64);
+  m.listWithSubtitleRowHeight = enlarged(capped(m.listWithSubtitleRowHeight, 60), 88);  // a title and two small lines
+  m.menuRowHeight = enlarged(capped(m.menuRowHeight, 36), 76);
+  m.menuSpacing = enlarged(capped(m.menuSpacing, 4), 12);
+  m.tabBarHeight = enlarged(capped(m.tabBarHeight, 30), 64);
+  m.homeTopPadding = enlarged(capped(m.homeTopPadding, 28), 64);  // clear of the battery line
   m.homeCoverHeight = capped(m.homeCoverHeight, 154);
   m.homeCoverTileHeight = capped(m.homeCoverTileHeight, 170);
   m.homeRecentBooksCount = capped(m.homeRecentBooksCount, 2);  // three covers leave each a 66 px tile
@@ -147,6 +148,7 @@ struct HomeLayout {
 // Additional themes can inherit from this and override methods as needed
 
 namespace BaseMetrics {
+inline constexpr int homeBookDetailsHeight = 0;
 constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .batteryHeight = 12,
                                           .topPadding = 5,
@@ -179,7 +181,7 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .keyboardVerticalOffset = -13,
                                           .keyboardTextFieldWidthPercent = 85,
                                           .headerSubtitleLine = 23});
-}
+}  // namespace BaseMetrics
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
@@ -408,7 +410,10 @@ class BaseTheme {
   virtual StackedHomeRules stackedHomeRules() const { return {280, 2}; }
   // The cover thumbnail height for a stacked tile this tall. It goes into the thumbnail's
   // filename, so the theme that draws the cover and the cover pass must agree on it.
-  virtual int stackedCoverHeight(const int tileHeight) const { return tileHeight > 120 ? tileHeight : 120; }
+  virtual int stackedCoverHeight(const int tileHeight) const {
+    const int coverHeight = tileHeight - BaseMetrics::homeBookDetailsHeight;
+    return coverHeight > 120 ? coverHeight : 120;
+  }
 
   // Up/down triangles marking that the list continues past the visible rows. Used by themes
   // without a scroll bar.
