@@ -183,6 +183,48 @@ callback behaviour, not just the logging.
   `[CLK] TLS host:443: certificate dates not checked (chain and name are): the clock, epoch N, is
   restored from NVS`; `[TLS] Ignoring certificate date error -150 at epoch N` when it mattered.
 
+### Wi-Fi session end on an ESP32-S3 (Picco, 2026-11-27)
+
+Measured for the in-place return after a Wi-Fi screen (`wifi_session::end()`,
+`docs/superpowers/specs/2026-11-26-wifi-exit-without-reboot-design.md`). All figures are the internal heap
+(`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT`), free / largest block.
+
+- **The first session costs about 18.8 KB once, and it is not a leak.** A heap map (`heap_caps_walk()` plus the
+  task list, throwaway branch `spike/wifi-heap-map`) before Wi-Fi and after each session: 182,452 / 139,252 at
+  boot, 163,636 / 90,100 after one join. 15,184 B of the new blocks are three tasks that start with the first
+  radio-on and are never deleted: lwIP's `tiT` (4,864 B stack block), ESP-IDF's event loop `sys_evt` (4,864) and
+  Arduino's `arduino_events` (4,352), each with a 368 B control block. `esp_netif_deinit()` is not supported, so
+  they live until the next restart by design. The other ~3.5 KB are about 40 small blocks (16-640 B).
+- **The largest block drops by 49 KB because of where those blocks sit.** The three stacks land at the head of the
+  largest free region, and a dozen small long-lived blocks (16-104 B) sit further into it with free gaps between
+  them. The free memory is still there, split up. It does not get worse: the largest block read 90,100 after every
+  later session.
+- **Later sessions keep one 28-byte block each** (32 B with the heap header), a join with an HTTPS request
+  (api.github.com, TLS 1.3) as much as a join alone; the first HTTPS session also kept 224 B once. The 28-byte
+  block's owner is not identified (heap tracing is compiled out). At 32 B a session an S3 needs thousands of
+  sessions in one boot to reach the minimums.
+- **Every migrated screen returned in the same boot**, PR 1 at c49ba72ce:
+
+  | Screen (log tag) | At the session end | Back on |
+  |---|---|---|
+  | Sync Time (`NTP`) | 131,860 / 57,332 | Clock settings |
+  | Detect Timezone (`TZ`) | 131,264 / 53,236 | Clock settings |
+  | Wi-Fi Networks (`SET`) | 133,080 / 57,332 | Settings, same tab |
+  | Weather (`WEATHER`) | 162,704 / 57,332 | Home |
+  | KOReader account check (`KOAuth`) | 130,456 / 59,380 | KOReader settings, Settings below |
+  | KOReader sync from a book (`KOSync`) | 163,012 / 59,380 | the book, same page |
+  | OPDS browser (`OPDS`) | 163,708 / 90,100 | File Transfer, OPDS row |
+  | Join backed out, then OPDS from the mode picker (`NETMODE`) | 161,020 / 86,004 | the OPDS browser |
+
+  Five KOReader syncs in a row ended at 163,012, 162,912, 162,888, 162,868 and 162,828, the largest block at
+  59,380 each time, and a Weather join after them fetched normally. The lowest readings (130,456 free, 53,236
+  largest) are about twice the minimums (67,584 / 24,576).
+- **The three ways out that still restart behaved.** Weather left while the background sync worker held the radio
+  logged `the background sync holds the radio; restarting` and restarted to Home with no panic. A long press of
+  Power on Detect Timezone with the radio up went to sleep without a restart or a second teardown, and woke
+  normally. A test build with the free minimum at 500,000 logged `[ERR] ... under the minimums 500000/24576;
+  restarting` and restarted into Clock settings.
+
 ## Retired hypotheses
 
 Each of these was believed, acted on, and disproven. Do not re-propose without new evidence.

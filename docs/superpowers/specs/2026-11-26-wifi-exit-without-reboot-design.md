@@ -43,6 +43,8 @@ Anti-goals (a failure even if it works)
 |---|---|---|---|
 | X3 (C3) | KOReader sync, full `esp_wifi_stop` + deinit | ~20.5 KB below the pre-Wi-Fi free heap (-20,560 / -20,588 / -20,644, three sessions); contig unchanged across a push (61,428) | `KOReaderSyncActivity.cpp:762-778` |
 | T5S3 (S3) | Wi-Fi up and cancelled, no TLS, 3 cycles | 138,940 / 77,812 before; 120,020 / 49,140 after the first session; then about -288 B per session, largest block stays 49,140 | Metalio adoption ledger, item 8 (`perf/kosync-no-reboot-psram` @ bbb6d5bdc, local) |
+| Picco (S3) | Heap map: a join, then three joins each with one HTTPS request (2026-11-27) | 182,452 / 139,252 before; 163,636 / 90,100 after the first session; then -224 B once and -32 B per session, largest block stays 90,100 | `docs/network-stack-findings.md`, "Wi-Fi session end on an ESP32-S3" |
+| Picco (S3) | PR 1, every migrated screen, five KOReader syncs in a row | Lowest at a session end: 130,456 free, 53,236 largest; every screen carried on | same |
 
 The in-place return itself worked on the T5S3 (the reader reopened in the same boot). No foreground S3 session
 with TLS has been measured after teardown. The S3 background sync already runs TLS without a reboot, and its
@@ -61,6 +63,12 @@ pieces that live until the next reboot, by design:
 Together they are an estimated 11-13 KB, allocated after boot in the middle of the free heap, which would also
 explain the drop in the largest block. They are paid once: a second session does not pay them again. The rest of
 the ~19 KB and the 288 B per session are not explained.
+
+**Measured on the Picco (2026-11-27).** The heap map confirmed the three tasks: their stacks and control blocks
+are 15,184 B of the first session's 18.8 KB (the stack blocks are larger than the config values above: 4,864,
+4,864 and 4,352 B). The rest is about 40 small blocks. The stacks sit at the head of the largest free region and
+small long-lived blocks pin gaps further in, which is the drop in the largest block. Each later session keeps one
+28-byte block, with or without TLS. Details: `docs/network-stack-findings.md`.
 
 ## What the reboot does today (audit, 2026-11-26)
 
@@ -278,10 +286,11 @@ on for about 180 sessions before the free figure reaches the minimum and it rebo
 
 ## Risks
 
-- The one-time ~19 KB is only partly explained (see "Where the one-time cost probably goes"). If a later S3
-  session needs more than the minimums assume, the first symptom is a failed join or handshake, not a crash: the
-  device run must include a second session after a carry-on.
-- The -288 B per session is a slow leak of unknown origin. The minimums bound it; they do not explain it.
+- The one-time ~19 KB is 15.2 KB of network tasks plus about 3.5 KB of small blocks (measured, see "Where the
+  one-time cost probably goes"). If a later S3 session needs more than the minimums assume, the first symptom is a
+  failed join or handshake, not a crash: the device run included five sessions after a carry-on, and a sixth.
+- Each session keeps one 28-byte block whose owner is not identified (the Picco, with and without TLS). The T5S3's
+  -288 B per session came from a different run and is not explained. The minimums bound both.
 - The local branches `perf/kosync-no-reboot-psram` and `feat/settings-live-ui-look` belong to the Metalio
   adoption workstream (ledger `C:/tmp/wt-metalio-adopt/LEDGER.md`). PR 1 supersedes item 8; its ledger row should
   say so.
