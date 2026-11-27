@@ -480,6 +480,10 @@ inline const char* boardDisplayName(BoardConfig::Board board) {
       return "X3";
     case BoardConfig::Board::XteinkX4Pro:
       return "X4 Pro";
+    case BoardConfig::Board::XteinkX4Classic:
+      return "X4 Classic";
+    case BoardConfig::Board::EegoA4:
+      return "EEGO A4";
     case BoardConfig::Board::M5StackPaperColor:
       return "M5Paper Color";
     case BoardConfig::Board::MurphyM3:

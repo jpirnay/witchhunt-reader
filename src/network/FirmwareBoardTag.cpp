@@ -23,6 +23,8 @@
 #define CROSSPOINT_BOARD_NAME "sticky"
 #elif FREEINK_DEVICE_M5PAPER
 #define CROSSPOINT_BOARD_NAME "m5paper"
+#elif FREEINK_DEVICE_EEGO_A4  // upstream's name, so its images and ours can replace each other
+#define CROSSPOINT_BOARD_NAME "eego_a4"
 #elif FREEINK_DEVICE_LILYGO
 #define CROSSPOINT_BOARD_NAME "lilygo"
 #elif FREEINK_DEVICE_M5

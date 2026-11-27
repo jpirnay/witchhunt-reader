@@ -13,6 +13,14 @@
 #include "images/Logo120.h"
 #include "util/ByteSize.h"
 
+// A board this project builds for but has never run on (platformio.ini, "EXPERIMENTAL BOARDS"). Shown on
+// its own row so a photo of this screen in a report says so.
+#if defined(CROSSPOINT_EXPERIMENTAL_BOARD) && CROSSPOINT_EXPERIMENTAL_BOARD
+static constexpr bool kExperimentalBoard = true;
+#else
+static constexpr bool kExperimentalBoard = false;
+#endif
+
 // Set to 1 to add a "Declined" row breaking down why idle light sleep did not
 // happen: the attempt count, then per-guard counters (lock / wifi / usb / front /
 // dbnc / idf). A diagnostic for the idle-power path rather than something a reader
@@ -268,11 +276,12 @@ void SystemInformationActivity::render(RenderLock&&) {
 
   const auto& status = *status_;
 
-  drawSection(tr(STR_SEC_VERSION), 5);
+  drawSection(tr(STR_SEC_VERSION), 5 + (kExperimentalBoard ? 1 : 0));
   drawRow(tr(STR_FW_VERSION), status.version);
   drawRow(tr(STR_DISPLAY_SDK), status.displaySdk);
   drawRow(tr(STR_DEVICE), std::string(status.deviceType) + " (" + std::to_string(status.displayWidth) + " x " +
                               std::to_string(status.displayHeight) + " px)");
+  if (kExperimentalBoard) drawRow(tr(STR_BOARD_SUPPORT), tr(STR_BOARD_EXPERIMENTAL));
   drawRow(tr(STR_DISPLAY_CONTROLLER), status.displayController);
   // The profile, not just "X3"/"X4": the per-batch panel variants select different
   // sibling profiles, and that distinction is what makes two field reports comparable.
