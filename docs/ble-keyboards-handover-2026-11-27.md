@@ -5,8 +5,10 @@ cheapest way to take key presses from a Bluetooth LE keyboard or page turner, ab
 X3), whose heap is the binding constraint. The topic's open items on master are in
 `docs/future_work/ble-keyboards.md`; this file holds the measurements and the reasoning behind them.
 
-Status: the build-time half is done and measured. The device half (heap on the X4) has not run: the X4 was not
-connected. Every heap figure below that is not labelled "measured" is a prediction from the link map.
+Status: the build-time half is done and measured, for both of Espressif's controller libraries (the ROM-assisted
+one the prebuilt core links, and the flash-only one swapped in at link time). The device half (heap on the X4, and
+whether the swapped controller runs) has not run: the X4 was not connected. Every heap figure below that is not
+labelled "measured" is a prediction from the link map.
 
 ## What is on the branch
 
@@ -14,13 +16,16 @@ connected. Every heap figure below that is not labelled "measured" is a predicti
 |---|---|
 | `src/BleSpike.cpp` | `CMD:BLE:<op>` over the serial test API: `CTRL` / `CTRL_OFF` (Espressif's controller alone, driven with raw HCI over VHCI: reset, event mask, a 3 s passive scan), `HOST` / `HOST_OFF` (the SDK's `BleKeyboardHost` on NimBLE-Arduino: begin, a 3 s scan, end), `KEEP=0\|1` and `MEM` (whether the next boot keeps the controller's memory). Each reply lists free and largest-free-block after every step, and the since-boot minimum. |
 | `src/SerialTestApi.cpp` | Registers `BLE` in `kCommands` (dev builds only). |
-| `platformio.ini` | `env:default` only: adds `BleKeyboardHost` and `h2zero/NimBLE-Arduino@2.5.1` to `lib_deps`, and the pre-script below. |
-| `scripts/ble_spike_flags.py` | A build middleware that gives only the BLE sources (NimBLE-Arduino, `BleKeyboardHost`, `BleSpike.cpp`) `-include scripts/ble_spike_nimble_c3.h` and `-DFREEINK_CAP_BLE_HID_HOST=1`, so every other object stays cached. |
+| `platformio.ini` | `env:default` only: adds `BleKeyboardHost` and `h2zero/NimBLE-Arduino@2.5.1` to `lib_deps`, the two scripts below, and `custom_ble_spike_controller` (`rom` or `flash`; the branch is at `flash`). |
+| `scripts/ble_spike_flags.py` | A build middleware that gives only the BLE sources (NimBLE-Arduino, `BleKeyboardHost`, `BleSpike.cpp`) `-include scripts/ble_spike_nimble_c3.h` and `-DFREEINK_CAP_BLE_HID_HOST=1`, so every other object stays cached; with `flash`, also `-DBLE_SPIKE_FLASH_CTRL=1`. |
 | `scripts/ble_spike_nimble_c3.h` | Sizes NimBLE's host like upstream CrossPoint's tuned C3 core (central and observer only, 1 connection, 4 bonds, MTU 23, 4 KB host task, 12/12 msys blocks, 8 ACL buffers) without rebuilding the Arduino core. |
+| `scripts/ble_spike_flash_ctrl.py` | With `flash`: the link-time swap to the flash-only controller ("Option B" below). |
+| `tools/ble-spike/fetch_flash_controller.sh` | Fetches that library (not in the repository) into `.pio/ble-spike/flash-controller/` and checks its git blob id. |
 | `tools/ble-spike/map_attrib.py`, `map_buckets.py` | Diff two `firmware.map` files by output section and archive member, and group the result by component. |
 
-Build: `pio run -e default` (fresh worktree on this machine: about 80 minutes; an incremental BLE rebuild about 18).
-`python tools/ble-spike/map_buckets.py <master>/firmware.map <spike>/firmware.map` reproduces the tables below.
+Build: `pio run -e default` (fresh worktree on this machine: about 80 minutes; an incremental BLE rebuild 9 to 18).
+With `flash`, run `tools/ble-spike/fetch_flash_controller.sh` once first. `python tools/ble-spike/map_buckets.py
+<master>/firmware.map <spike>/firmware.map` reproduces the tables below.
 
 ## Results: what the SDK's NimBLE host costs on the C3 (measured, build)
 
@@ -89,11 +94,16 @@ other vendors' radios). Wi-Fi coexistence is in the blobs too.
 ### What decides what links: one constant table
 
 `btdm_controller_init` (inside `libbtdm_app.a`, `arch_main.o`) references `r_ip_funcs_ro` (`ip_funcs.o`): one
-2,532 B rodata section holding 601 function pointers, the controller's patches over the ROM link layer. It names every
-patched function, advertising included, so everything it points to links whatever `bt.c`'s feature switches say.
-The `ble_*_funcs_reset` functions that those switches gate live in `arch_main.o` too, but the table is referenced
-from `btdm_controller_init` itself (`objdump -r arch_main.o`), not from them. **No configuration and no own copy of
+2,532 B rodata section holding 601 function pointers, the link layer's dispatch table. The `ble_*_funcs_reset`
+functions that `bt.c`'s feature switches gate live in `arch_main.o` too, but the table is referenced from
+`btdm_controller_init` itself (`objdump -r arch_main.o`), not from them. **No configuration and no own copy of
 `bt.c` trims the controller to HID only.**
+
+Most entries do not reach the blob at all. `esp32c3.rom.bt_funcs.ld` and `esp32c3.rom.eco3_bt_funcs.ld` bind 880
+names (761 of them `r_*`) to ROM addresses with plain assignments, and a linker-script assignment wins over the blob's
+own definition of the same name: in the spike's ELF, 810 of the 822 names both define resolve to ROM. Of the table's 601 entries, 488
+resolve to ROM and 80 to the blob; of its 106 advertising entries, 103 resolve to ROM and 3 to the blob. What links
+from the ROM-assisted blob are its patches and the functions the ROM lacks.
 
 Linked from the ROM-assisted blob (55 of its 102 objects, 104,188 B: 72,590 text, 8,588 rodata, 23,010 IRAM). The
 largest pieces a central-only HID host never uses:
@@ -105,14 +115,14 @@ largest pieces a central-only HID host never uses:
 | `lld_per_adv.o`, `lld_sync.o` | 234 | 398 | periodic advertising and sync |
 | `lld_test.o`, `bt_rw_v9.o` | 1,058 | 212 | direct test mode |
 
-### Option A: a hand-built patch table (ROM-assisted blob, HID only)
+### Option A: a hand-built patch table (ROM-assisted blob, HID only): not worth it
 
-The ROM keeps the original functions the table patches (`esp32c3.rom.*.ld`: `r_lld_adv_end = 0x40001014`, ...). An
-own `r_ip_funcs_ro`, linked ahead of the archive, whose advertising entries point back at the ROM originals would
-leave `llm_adv.o` and `lld_adv.o` unreferenced. Estimate: about 20 KB of flash and about 5.4 KB of IRAM (heap at every
-boot). It is fragile: 601 entries to rebuild exactly, tied to one blob build (guard it by sha256, as
-`scripts/iram_budget.py` guards `sections.ld`), and the ROM versions are unpatched. It still leaves about 17.5 KB of
-IRAM. Not tried.
+The idea was an own `r_ip_funcs_ro` whose advertising entries point back at the ROM originals, leaving `llm_adv.o`
+and `lld_adv.o` unreferenced. The count above undoes it: 103 of the 106 advertising entries already point at ROM. The
+advertising objects come in through a few blob-only functions instead: `ip_funcs.o` needs `r_ble_ll_qa_config_get`
+from `lld_adv.o`, which needs `llm_ext_adv_get_own_addr` from `llm_adv.o` (the map's archive-member list). Dropping them
+would mean patching the blob's own code paths, not a table, for at most the 20 KB of flash and 5.4 KB of IRAM those two
+objects hold. Not tried, and not recommended.
 
 ### Option B: the flash-only blob, swapped in at link time (no core rebuild)
 
@@ -125,16 +135,51 @@ totals (measured with `objdump -h`):
 | `libbtdm_app.a` (ROM-assisted, what we link) | 28,622 | 259,244 | 13,738 | 1,998 |
 | `libbtdm_app_flash.a` (flash only) | 1,490 | 284,328 | 15,237 | 2,170 |
 
-The flash-only blob replaces the ROM, so much more of it links (an upper bound of about 301 KB of flash, against
-104 KB now), and its IRAM drops to 1.5 KB. The prebuilt `bt.c.obj` needs 39 symbols from the blob. The flash blob
-lacks exactly 9 of them, the `ble_*_funcs_reset` functions that flash-only `bt.c` does not call. So the swap needs:
+The flash-only blob replaces the ROM, so much more of it links, and its IRAM drops to 1.5 KB. The prebuilt
+`bt.c.obj` needs 39 symbols from the blob. The flash blob lacks exactly 9 of them, the `ble_*_funcs_reset` functions
+that flash-only `bt.c` does not call. IDF's flash-only build differs from the ROM-assisted one in five places, and
+`scripts/ble_spike_flash_ctrl.py` plus `src/BleSpike.cpp` stand in for each:
 
-1. the flash blob under the name `libbtdm_app.a`, ahead of the framework's library directory, so that
-   `[mapping:btdm]` (`linker_rw_bt_controller.lf`) still matches it in `sections.ld`;
-2. nine empty `ble_*_funcs_reset` stubs, which is what flash-only `bt.c` amounts to (line 1355);
-3. `-Wl,--wrap=esp_intr_alloc`, clearing `ESP_INTR_FLAG_IRAM` for the controller's interrupt sources, which is what
-   flash-only `bt.c` does at line 874. IDF refuses an IRAM-flagged interrupt whose handler is not in IRAM, so a
-   missing wrapper fails at init rather than at run time.
+1. **The library** (`components/bt/controller/CMakeLists.txt`, lines 15-22): the flash blob, stored under the name
+   `libbtdm_app.a` in a directory ahead of the framework's, so that `sections.ld`'s `*libbtdm_app.a` rules (from
+   `[mapping:btdm]`, `linker_rw_bt_controller.lf`) still place its data and bss.
+2. **The ROM scripts** (`components/esp_rom/CMakeLists.txt`, lines 122-125 and 289-291): `esp32c3.rom.bt_funcs.ld`
+   and `esp32c3.rom.eco3_bt_funcs.ld` are left out. Kept, their assignments would bind 823 of the flash blob's own
+   functions to ROM code.
+3. **The interrupt** (`bt.c`, line 874): `-Wl,--wrap=esp_intr_alloc`. The wrapper clears `ESP_INTR_FLAG_IRAM` only
+   for calls made while the spike initialises the controller (around `esp_bt_controller_init()` for `CTRL`, around
+   `BleHid.begin()` for `HOST`) whose handler is outside IRAM, and counts them (`irq_iram_cleared` in both replies).
+   IDF refuses an IRAM-flagged interrupt whose handler is not in IRAM, so a missing wrapper fails at init rather than
+   at run time.
+4. **The ROM-table resets** (`bt.c`, line 1355): nine empty `ble_*_funcs_reset` stubs.
+5. **The runtime config** (`esp_bt.h`, line 386): `.run_in_flash = 1`. `BT_CONTROLLER_INIT_CONFIG_DEFAULT()` sets it
+   from the option, and the macro expands in code we compile: `BleSpike.cpp` and NimBLE's two init paths
+   (`NimBLEDevice.cpp:922`, `nimble_port.c:167`). So `scripts/ble_spike_nimble_c3.h` defines
+   `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY` for the BLE sources, and the `CTRL` reply shows `run_in_flash`.
+
+Measured (link, 2026-11-27; the same spike with NimBLE, only the controller swapped). It links with no undefined
+symbol. The map takes `libbtdm_app.a` only from `.pio/ble-spike/flash-controller`. All 698 linked names from the
+dropped scripts resolve in the image, none at a ROM address (for example `r_lld_adv_end`: `0x422d6b94`, not
+`0x40001014`).
+
+| | ROM-assisted | flash-only | delta |
+|---|---|---|---|
+| Controller + IDF glue, flash (`map_buckets.py`) | 112,910 | 252,133 | +139,223 |
+| Controller + IDF glue, IRAM | 23,458 | 1,506 | −21,952 |
+| `.iram0.text` | 93,656 | 71,704 | −21,952 |
+| `.dram0.dummy` (where the heap starts) | 93,696 | 72,192 | −21,504 |
+| `RAM:` | 69,380 | 69,436 | +56 |
+| `Flash:` | 6,394,731 | 6,535,315 | +140,584 |
+| free in the app slot | 158,869 | **18,285** | |
+
+So 243,867 B of the flash blob's 301 KB links (104,672 B of the ROM-assisted one did), and **NimBLE with the
+flash-only controller fits**, with 18 KB left.
+Measured against master, that build's `Flash:` is +379,610 B, `RAM:` +8,840 B and `.iram0.text` +1,514 B. The
+predicted boot heap is about 10.4 KB below master (1,536 + 8,840), against about 31.8 KB for the ROM-assisted one.
+
+The flash-only controller still uses ROM-reserved DRAM: `r_ip_funcs_p` comes from `esp32c3.rom.ld` (always linked,
+in IDF's flash-only build too) at `0x3fcdff8c`. So the boot gate on `bleInUse()` stays necessary: BLE on keeps that
+region.
 
 What it does at run time: with the interrupt not in IRAM, the controller is held off during every flash erase and
 write. Espressif's Kconfig help warns that BLE "may not work properly during erasing flash" and recommends flash
@@ -142,27 +187,30 @@ auto-suspend, which the prebuilt core leaves off (`CONFIG_SPI_FLASH_AUTO_SUSPEND
 cache (`FlashArea`) and for NVS. Whether a connected page turner survives that (its supervision timeout is usually
 several seconds) is untested.
 
-Untested end to end. The linked size of the flash blob is the first measurement to take.
+It links; whether it runs is untested. On the X4: `CMD:BLE:CTRL` should report `run_in_flash=1`,
+`irq_iram_cleared` ≥ 1, `cmds_ok=5` and advertising reports; `CMD:BLE:HOST` (after a reboot) `irq_iram_cleared` ≥ 1
+and devices found. A connected page turner then has to survive flash writes (a font-cache fill, a settings
+save), and Wi-Fi has to work alongside it (coexistence; the spike never turns both on).
 
 ## The options on the C3, side by side
 
-Static figures are measured or are bounds from archive sizes; the custom host's size (15-20 KB) is an estimate.
-"Boot heap" is with the NVS-gated boot release, BLE off; "MMU pages" is the font cache's loss at 64 KB of app growth
-per page.
+The two NimBLE rows are measured builds. The custom-host rows are derived: each takes the measured controller, the
+spike's `CTRL` harness and about 5 KB of strings and relaxation, plus a host estimated at 15-20 KB. "Boot heap" is
+predicted from the map, with the NVS-gated boot release and BLE off. "MMU pages" is the font cache's loss, one page per
+64 KB of app growth.
 
-| Design | Flash | Free in slot | Boot heap vs master | MMU pages |
+| Design | Flash vs master | Free in slot | Boot heap vs master | MMU pages |
 |---|---|---|---|---|
-| ROM blob + NimBLE (the spike, measured) | +239 KB | 159 KB | about −32 KB (predicted) | 4 |
-| ROM blob + custom host | about +135 KB | about 260 KB | about −25 KB | 3 |
-| ROM blob + custom host + option A | about +115 KB | about 280 KB | about −20 KB | 2 |
-| Flash blob + custom host (option B) | ≤ about +335 KB | ≥ about 60 KB | about −5 KB | 6 |
-| Flash blob + NimBLE | ≤ about +436 KB | −38 KB at the bound: no room in practice | about −11 KB | 7 |
+| ROM-assisted controller + NimBLE (measured) | +239,026 B | 158,869 B | about −31.8 KB | 4 |
+| Flash-only controller + NimBLE (measured) | +379,610 B | 18,285 B | about −10.4 KB | 6 |
+| ROM-assisted controller + custom host | about +140 KB | about 258 KB | about −25 KB | 3 |
+| Flash-only controller + custom host | about +280 KB | about 118 KB | about −4 KB | 5 |
 
-On the C3 every design pays either about 23 KB of heap at every boot (ROM blob) or about 200 KB of flash (flash blob).
-A custom host matters most with the flash blob, where it is the difference between fitting and not. Master's C3
-sdkconfig trim (`docs/future_work/font-flash.md`, "The C3 sdkconfig trim", about −145 KB of flash) would make room
-for the flash blob. It needs the core rebuild that would also set `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY` (and auto-suspend)
-the supported way.
+On the C3 every design pays either about 23 KB of heap at every boot (ROM-assisted) or about 140 KB more flash
+(flash-only). A custom host saves about 100 KB of flash with either; with NimBLE, the flash-only build leaves only
+18 KB of the slot for all future growth. Master's C3 sdkconfig trim (`docs/future_work/font-flash.md`, "The C3
+sdkconfig trim", about −145 KB of flash) would buy that room back. It needs the core rebuild that would also set
+`CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY` (and flash auto-suspend) the supported way.
 
 On the S3 boards (8 MB of PSRAM) the heap is not the binding limit, so the SDK's `BleKeyboardHost` on NimBLE is the
 shortest path there. Upstream puts NimBLE's host in PSRAM with a forced include (`s3_nimble_psram.h`). Not measured
@@ -195,20 +243,21 @@ scope (`SCOPE.md`).
 
 ## Next steps, in order
 
-1. **Link the flash blob** (option B; no device needed): fetch `libbtdm_app_flash.a` from `esp32c3-bt-lib` at
-   0a08c4b3, add the stubs and the wrapper to the spike, build `default`, and record `Flash:`, `RAM:` and
-   `.iram0.text` with `map_buckets.py`.
-2. **Heap on the X4** (needs the device): flash `firmware.factory.bin` at 0x0 with esptool, copy the web bundle to the
-   card, then read `CMD:STATE` and `CMD:BLE:MEM`, in this order:
+1. ~~Link the flash blob~~: done, measured above.
+2. **On the X4** (needs the device), for each controller (`custom_ble_spike_controller = rom`, then `flash`): flash
+   `firmware.factory.bin` at 0x0 with esptool, copy the web bundle to the card, then read `CMD:STATE` and
+   `CMD:BLE:MEM`, in this order:
    - master at Home and in a book;
    - the spike with `KEEP=1`: at Home, `CMD:BLE:CTRL`, `CMD:REBOOT`, `CMD:BLE:HOST`, `CMD:BLE:HOST_OFF`, and `HOST`
      again in a book;
    - the spike with `KEEP=0` (then `CMD:REBOOT`): at Home.
 
-   Repeat with option B's build. Put master back afterwards.
-3. **Decide the C3 design** from 1 and 2: the heap the X3 can give up against the flash it can give up. The S3 boards
-   can take the SDK host independently.
-4. Only then, if the C3 goes ahead with a lean blob: design the custom host (see above) and the boot gate.
+   With `flash`, also pair a page turner and fill the font cache while connected. Put master back afterwards. When
+   switching controllers, `cmp` the new `firmware.bin` against the app inside `firmware.factory.bin`: a cached build
+   can leave the other build's app in the factory image.
+3. **Decide the C3 design** from the table above and 2: the heap the X3 can give up against the flash it can give
+   up. The S3 boards can take the SDK host independently.
+4. Only then: design the custom host (see above) and the boot gate, if the C3 goes ahead.
 
 ## Traps met on the way
 
@@ -218,6 +267,9 @@ scope (`SCOPE.md`).
 - **Build middlewares chain.** One that returns `env.Object(node)` hands the next one a `NodeList`.
   `git_branch.py`'s `scope_git_defines` calls `node.srcnode()`, so an object-returning middleware must register after
   it and pass a `NodeList` through.
+- **Linker-script assignments beat object definitions.** The ROM scripts' plain `r_x = 0x4000....;` lines win over a
+  blob's own `r_x`, silently. Swapping a controller library without dropping its ROM scripts links a mix of flash and
+  ROM code; check addresses with `nm` on the ELF (type `A` = ROM).
 - **NimBLE's settings override.** NimBLE-Arduino compiles its own bundled host; `nimconfig.h` keeps every
   `CONFIG_BT_NIMBLE_*` that `sdkconfig.h` already defines, so `-D` flags do not override the prebuilt values. The
   forced include has to `#undef` and redefine after including `sdkconfig.h`.
