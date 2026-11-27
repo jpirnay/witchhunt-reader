@@ -101,9 +101,26 @@ callback behaviour, not just the logging.
   alone.
 - **Downloads need memory freed first.** The font and firmware screens call
   `releaseMemoryForDownload()` before Wi-Fi comes up and again before the transfer. On top of the
-  network trim (secondary framebuffer, glyph caches) it unloads a loaded SD font and the global
-  bookmark index, and drops the settings lists of the screens buried below
-  (`ActivityManager::releaseBuriedActivityState`).
+  network trim (secondary framebuffer, glyph caches) it unloads a loaded SD font and drops the
+  settings lists of the screens buried below (`ActivityManager::releaseBuriedActivityState`) on the
+  C3s, which restart after the download. The PSRAM boards keep both: their screens below come back
+  in the same boot (`wifi_session::end()`).
+- **A download on the X4 Pro and the Murphy leaves the heap well above the minimums** (2026-11-27,
+  `perf/wifi-exit-downloads`, internal free / largest block). The lowest free figure of a session
+  was the first manifest fetch: `Min Free` 74,640 B on the X4 Pro, 74,460 B on the Murphy during
+  its German pack. The largest block fell to 42,996 B during every download (63,476 B at rest),
+  against the 24,576 B minimum. Every exit carried on:
+
+  | Exit (log tag) | X4 Pro | Murphy |
+  |---|---|---|
+  | Font Manager from Settings, a hyphenation pack installed (`FONT`) | 129,464 / 42,996, Settings, same row | 127,416 / 42,996, same |
+  | Language picker's pack offer, pack and hyphenation (`FONT`) | 158,592 / 73,716, Settings, the UI in the new language | 155,228 / 69,620, same |
+  | Home's offer (`FONT`) | 159,676 / 61,428, Home | 156,176 / 63,476, Home |
+  | Check for updates, no firmware update (`OTA`) | 137,592 / 61,428, Settings, same row | 138,604 / 63,476, same |
+  | Check for updates' pack update, handed to the Font Manager (`FONT`) | 158,708 / 61,428, Settings | not run |
+
+  Deleting packs in a second session of the same boot carried on too. A book's pack offer was not run: the reader
+  makes none for a book under `/test` (`SerialTestApi::isTestBook()`).
 
 ### WiFi
 
