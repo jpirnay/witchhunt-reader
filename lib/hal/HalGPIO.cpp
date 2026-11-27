@@ -1008,15 +1008,25 @@ bool HalGPIO::wasSwipe(float&, float&, float&, float&) const { return false; }
 bool HalGPIO::wasTouchActivity() const { return false; }
 #endif  // FREEINK_CAP_TOUCH
 
+bool HalGPIO::powerPinActiveHigh() { return BoardConfig::ACTIVE.input.powerActiveHigh; }
+
+bool HalGPIO::powerPinPressed() {
+  return digitalRead(InputManager::POWER_BUTTON_PIN) == (powerPinActiveHigh() ? HIGH : LOW);
+}
+
+void HalGPIO::configurePowerPin() {
+  pinMode(InputManager::POWER_BUTTON_PIN, powerPinActiveHigh() ? INPUT_PULLDOWN : INPUT_PULLUP);
+}
+
 unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
-  // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS
+  // Wait until the raw power-button pin reads released for RELEASE_STABLE_MS
   // consecutive milliseconds.  The InputManager debounce (5 ms) is too short for
   // mechanical switch bounce which can last 10-50 ms, so we bypass it entirely here.
   constexpr unsigned long RELEASE_STABLE_MS = 200;
   const unsigned long waitStart = millis();
   unsigned long stableStart = 0;
   while (true) {
-    if (digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH) {
+    if (!powerPinPressed()) {
       if (stableStart == 0) stableStart = millis();
       if (millis() - stableStart >= RELEASE_STABLE_MS) break;
     } else {
@@ -1027,16 +1037,16 @@ unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
     // the panel is already in deep sleep holding the sleep screen, and the loop task is
     // not subscribed to the task WDT (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 is unset
     // and nothing calls esp_task_wdt_add on it), so nothing was going to rescue it. A pin
-    // that reads LOW indefinitely — a sticky or dirty switch, a finger that never comes
+    // that reads pressed indefinitely — a sticky or dirty switch, a finger that never comes
     // off — therefore froze the device with the sleep screen displayed and every button
     // dead, recoverable only by a reset (issue #155).
     //
     // Sleeping with the button still down is the lesser evil: the worst case is one
-    // immediate re-wake (the deep-sleep GPIO trigger is level-LOW), which the boot-side
+    // immediate re-wake (the deep-sleep GPIO trigger is level-triggered), which the boot-side
     // wake gate then classifies like any other press. A permanent freeze has no recovery
     // at all. The caller is told how long we waited so the breadcrumb can record it.
     if (millis() - waitStart >= timeoutMs) {
-      LOG_ERR("GPIO", "Power button still held after %lums — sleeping anyway (raw pin LOW)", timeoutMs);
+      LOG_ERR("GPIO", "Power button still held after %lums — sleeping anyway (raw pin pressed)", timeoutMs);
       return millis() - waitStart;
     }
     delay(10);
@@ -1062,7 +1072,7 @@ bool HalGPIO::isHeldNow(uint8_t buttonIndex, uint8_t confirmSamples) {
   for (uint8_t i = 0; i < confirmSamples; i++) {
     if (i > 0) delay(SAMPLE_GAP_MS);
     if (buttonIndex == BTN_POWER) {
-      if (digitalRead(InputManager::POWER_BUTTON_PIN) != LOW) {
+      if (!powerPinPressed()) {
         held = false;
         break;
       }
@@ -1144,8 +1154,8 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
     return WakeCheck{v, decidedAtMs, heldMs, requiredDurationMs};
   };
 
-  pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
-  if (digitalRead(InputManager::POWER_BUTTON_PIN) != LOW) {
+  configurePowerPin();
+  if (!powerPinPressed()) {
     return verdict(WakeVerdict::NotPressed, stamp(millis()), 0);
   }
 
@@ -1173,7 +1183,7 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
   while (true) {
     const unsigned long now = millis();
     const uint16_t heldMs = stamp(lastSeenPressed - gateStart);
-    if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
+    if (powerPinPressed()) {
       if (releaseSeenAt != 0) {
         // The pin went HIGH and is LOW again: either the second click of a double, or the
         // first press bouncing. The gap decides.
@@ -1294,7 +1304,7 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   // POWER_BUTTON_PIN is a C3 pin assumption (see isXteinkDevice()).
   if (isXteinkDevice() && !HalCapabilities::hasButtonGatedBatteryLatch() && wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED &&
       resetReason == ESP_RST_POWERON) {
-    if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
+    if (powerPinPressed()) {
       return WakeupReason::PowerButton;
     }
     return isUsbConnected() ? WakeupReason::AfterUSBPower : WakeupReason::PowerButton;
@@ -1308,7 +1318,7 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
       static_cast<unsigned long long>(ext1WakeMask), InputManager::POWER_BUTTON_PIN,
       InputManager::POWER_BUTTON_PIN >= 0 ? digitalRead(InputManager::POWER_BUTTON_PIN) : -1);
 
-  // A GPIO deep-sleep wake means POWER_BUTTON_PIN was pulled LOW, which is a button press by
+  // A GPIO deep-sleep wake means POWER_BUTTON_PIN reached its pressed level, which is a press by
   // definition — whatever the power source. This clause used to also require usbConnected, on the
   // premise that on battery the MCU is fully powered down so every wake arrives as POWERON.
   // HalPowerManager::startDeepSleep(keepClockAlive=true) broke that premise: with the clock
