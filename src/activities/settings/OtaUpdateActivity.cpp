@@ -19,6 +19,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
+#include "network/WifiSessionEnd.h"
 #include "util/FontCatalog.h"
 #include "util/FontDownloadRules.h"
 
@@ -166,7 +167,7 @@ void OtaUpdateActivity::updatePacks() {
   FontDownloadActivity::Wanted wanted;
   wanted.packUpdates = true;
   // In this screen's place, as a pack offer opens it (PackOffer::ask): the downloads' TLS session needs the heap. Left,
-  // the Font Manager restarts into Settings, where Check for updates was.
+  // the Font Manager goes back to Settings, where Check for updates was (FontDownloadActivity::ReturnTo::Settings).
   auto download =
       makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, wanted, FontDownloadActivity::ReturnTo::Settings);
   if (!download) {
@@ -199,9 +200,9 @@ void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
   // Free the heap the WiFi stack needs before it is brought up, not after -
-  // association itself is the allocation-heavy step, well ahead of TLS. That
-  // includes the per-category SettingInfo vectors of the SettingsActivity below
-  // us, which fragment the heap; onExit() reboots, so they are never needed again.
+  // association itself is the allocation-heavy step, well ahead of TLS. On the C3s
+  // that includes the per-category SettingInfo vectors of the SettingsActivity below
+  // us, which fragment the heap; onExit() reboots there, so they are never needed again.
   // WifiSelectionActivity sets WIFI_STA itself, so no radio work happens here.
   releaseMemoryForDownload(renderer, "OTA");
 
@@ -219,16 +220,14 @@ void OtaUpdateActivity::onEnter() {
 void OtaUpdateActivity::onExit() {
   Activity::onExit();
 
-  // Handed over to the Font Manager: the radio is its now, and it restarts when left.
+  // Handed over to the Font Manager: the radio is its now, and it ends the session when left.
   if (handingOver) return;
-  // Back to Settings, where this screen is opened and where Back leads, also after a join backed
-  // out of; it used to restart to Home. Settings below cannot be shown again anyway (onEnter()
-  // released its rows).
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(false);
-    delay(30);
-    silentRestartToSettings();
-  }
+  // Back to Settings, where this screen is opened and where Back leads, also after a join backed out of; it used to
+  // restart to Home. The C3s restart there, since onEnter() released the rows of Settings below. The PSRAM boards kept
+  // them, and after a check pop back to its tab and row while the heap allows. A begun install keeps its restart on
+  // every board: a firmware install is outside what a session end judges.
+  if (WiFi.getMode() == WIFI_MODE_NULL) return;
+  if (wifi_session::end("OTA") == wifi_session::Exit::Reboot || installStarted) silentRestartToSettings();
 }
 
 void OtaUpdateActivity::render(RenderLock&&) {
@@ -379,6 +378,7 @@ void OtaUpdateActivity::startUpdate() {
     }
     return true;
   });
+  installStarted = true;
   const auto beginResult = updater.beginInstallUpdate();
   if (beginResult != OtaUpdater::UPDATE_IN_PROGRESS) {
     LOG_DBG("OTA", "Update begin failed: %d", beginResult);

@@ -38,8 +38,11 @@ class OtaUpdateActivity : public Activity {
   PackCheck packCheck = PackCheck::NotRun;
   uint16_t packUpdates = 0;
   bool firmwareDeclined = false;  // NO_UPDATE after Cancel on the update question
-  // Leaving for the Font Manager, which takes the radio over and restarts when it is left.
+  // Leaving for the Font Manager, which takes the radio over and ends its session when it is left.
   bool handingOver = false;
+  // A firmware install was begun: leaving restarts on every board, whether it failed or was cancelled. A finished one
+  // restarts from loop() into the new firmware.
+  bool installStarted = false;
 
   void onWifiSelectionComplete(bool success);
   void askToUpdate();
