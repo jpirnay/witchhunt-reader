@@ -100,3 +100,10 @@ constexpr void applyTo(ThemeMetrics& metrics, const Step& growth) {
 // SilentRestart.h. Safe to call repeatedly; call it after changing SETTINGS.uiFontSize, and
 // call UITheme::reload() alongside it so the metrics follow the fonts.
 void applyUiFontScale();
+
+// The two together, from SETTINGS: the ladder binds the UI fonts and UITheme::reload() re-derives the metrics sized to
+// hold them; changing one without the other leaves rows that clip their own text. What takes a UI theme or UI font size
+// chosen since boot into use: Settings (SettingsActivity), and the end of a web session, since the web page and the
+// serial SET only store them. Under the exclusive render lock: reload() replaces the theme object, which a render pass
+// in flight still reads. Defined in main.cpp, beside applyUiFontScale().
+void applyUiLook();

@@ -254,11 +254,8 @@ void SettingsActivity::buildRows() {
 
 void SettingsActivity::onExit() {
   TabbedUiListActivity::onExit();
-  // Both read SETTINGS, so they are independent — but they are a pair: the ladder binds the UI
-  // fonts and reload() re-derives the metrics sized to hold them. Changing one without the other
-  // leaves rows that clip their own text.
-  applyUiFontScale();               // Re-bind the UI font ladder in case the size was changed
-  UITheme::getInstance().reload();  // Re-apply theme in case it was changed
+  // In case the theme or the UI font size was changed: here, or by the web page or a serial SET meanwhile.
+  applyUiLook();
 }
 
 void SettingsActivity::enterCategory(const int categoryIndex) {
@@ -380,9 +377,7 @@ void SettingsActivity::applyUiLookIfChanged(const uint8_t themeBefore, const uin
   if (SETTINGS.uiTheme == themeBefore && SETTINGS.uiFontSize == fontSizeBefore) return;
   {
     RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
-    // A pair, as in onExit(): the ladder binds the UI fonts and reload() re-derives the metrics sized to hold them.
-    applyUiFontScale();
-    UITheme::getInstance().reload();
+    applyUiLook();
     resetUi();
   }
   needsHalfRefresh = true;
