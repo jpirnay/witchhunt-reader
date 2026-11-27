@@ -21,6 +21,18 @@ included.
 | Murphy M3 | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | BOOX Picco | ESP32-S3 | yes | PSRAM, clock chip, reading light, slide switch, motion sensor (tilt page turns, auto-rotate) |
 
+**Experimental:** every release also has builds for three boards nobody on this project has run Witch Reader on. They
+come from the board descriptions in the shared SDK, are compiled with every change, and are offered because people
+asked for them. Expect rough edges: a build may not start, sleep or wake properly. Back up the whole flash before the
+first install, and [tell us](https://github.com/jpirnay/witchhunt-reader/issues) what works and what does not.
+What is known to be missing: [Experimental boards](docs/contributing/board-support.md#experimental-boards).
+
+| Device | Chip | Touch | Release files |
+| --- | --- | --- | --- |
+| Xteink X4 Classic | ESP32-S3 | no | `firmware-x4c.bin`, `full-install-x4c.bin` |
+| Seeed reTerminal Sticky | ESP32-S3 | yes | `firmware-sticky.bin`, `full-install-sticky.bin` |
+| EEGO Reader A4 | ESP32-S3 | yes | `firmware-eego_a4.bin`, `full-install-eego_a4.bin` |
+
 **Everything runs on the X3 and X4 as well.** The two ESP32-C3 boards have no PSRAM, and still get the whole reader:
 TrueType and OpenType fonts, every script below with OpenType shaping and bidi, vertical Chinese, Japanese and Korean,
 the hyphenation packs and Publisher Fonts. What they lack is mostly hardware: touch, a reading light, USB drive mode
@@ -72,6 +84,12 @@ Picco Witch Reader's partition table, with updates over Wi-Fi and from the card,
 recovery. **Update only** keeps Onyx's table, boot loader and recovery and writes the firmware into Onyx's app slot
 (0xE0000); Witch Reader cannot update itself there, so every later update comes from the flasher's Update only again.
 Either way, Onyx's own firmware is replaced.
+
+**Seeed reTerminal Sticky (experimental).** Its USB port is a serial bridge, which the flasher does not list. Use
+esptool: back up first with `esptool --chip esp32s3 read-flash 0 ALL sticky-backup.bin`, then write
+`full-install-sticky.bin` from the release page with `esptool --chip esp32s3 write-flash 0 full-install-sticky.bin`.
+Updates after that come over Wi-Fi or from the card. USB Drive mode is not offered: the port is not the chip's own
+USB.
 
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
 CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.

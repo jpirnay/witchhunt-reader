@@ -22,9 +22,14 @@ figure or device behaviour in a comment, doc or PR text is taken as fact by the 
 | LilyGo T5S3 | `lilygo_t5s3` | `lilygo_gh_release`, `lilygo_gh_release_rc` | ESP32-S3 | 8 MB | 960×540, LovyanGFX | yes | SPI |
 | Murphy M3 | `murphy` | `murphy_gh_release`, `murphy_gh_release_rc` | ESP32-S3 | 8 MB | 416×240 UC8253 | CHSC6x | SDMMC |
 | Onyx BOOX Picco | `picco` (`picco_stock` uploads onto Onyx's partition table) | `picco_gh_release`, `picco_gh_release_rc` | ESP32-S3 | 8 MB | 800×480 SSD1677/SSD2677 | TMA525C | SDMMC |
+| Xteink X4 Classic (experimental) | `x4c` | `x4c_gh_release`, `x4c_gh_release_rc` | ESP32-S3 | 8 MB | 800×480 SSD1677/UC8179/UC8279 | no | SDMMC |
+| Seeed reTerminal Sticky (experimental) | `sticky` | `sticky_gh_release`, `sticky_gh_release_rc` | ESP32-S3 | 8 MB | 800×480 SSD1677 | GT911 | SPI, shares the bus with the panel |
+| EEGO Reader A4 (experimental) | `eego_a4` | `eego_a4_gh_release`, `eego_a4_gh_release_rc` | ESP32-S3 | 8 MB | 768×552 UC8279C | GSLX680 | SPI |
 
-CI builds `default`, `x4pro`, `lilygo_t5s3`, `murphy` and `picco`. Build all five for any change that is
-not plainly board-neutral. The Picco runs under our `partitions.csv` or Onyx's stock table (one app slot, no
+CI builds `default`, `x4pro`, `lilygo_t5s3`, `murphy` and `picco`, and the experimental `x4c`, `sticky` and
+`eego_a4`. Build the five supported ones for any change that is not plainly board-neutral, and the experimental
+three when it touches board, input or power code. Experimental boards are built and published but have never run
+here: `docs/contributing/board-support.md`, "Experimental boards". The Picco runs under our `partitions.csv` or Onyx's stock table (one app slot, no
 self-update): `docs/contributing/board-support.md`, "Onyx BOOX Picco". Board notes: `docs/contributing/board-support.md`.
 
 **Design for the X3's heap, then use the S3s' PSRAM.** The C3 boards are the binding constraint: about
