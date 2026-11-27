@@ -200,6 +200,28 @@ callback behaviour, not just the logging.
   `[CLK] TLS host:443: certificate dates not checked (chain and name are): the clock, epoch N, is
   restored from NVS`; `[TLS] Ignoring certificate date error -150 at epoch N` when it mattered.
 
+### Wi-Fi session end after the web server (X4 Pro, Murphy, 2026-11-27)
+
+File Transfer and Calibre Wireless without the restart (`perf/wifi-exit-web-server`), internal free / largest block
+at the session end. Every exit carried on, and `ServerSession` read again what a web session can change:
+
+| Exit (log tag) | X4 Pro | Murphy |
+|---|---|---|
+| File Transfer, a file uploaded and deleted (`WEBACT`) | 168,432 / 65,524, Home | 169,148 / 69,620, Home |
+| The theme and the timezone set through `/api/settings`, a language pack uploaded (`WEBACT`) | 167,540 / 65,524, Home in the new theme, zone and language | 168,444 / 69,620, same |
+| A second session in the same boot (`WEBACT`) | 167,100 / 65,524 | 167,160 / 69,620 |
+| The hotspot, a host joined and served (`WEBACT`) | 161,232 / 65,524, Home; 192.168.4.1 gone at once, a later join worked | 160,988 / 65,524, same |
+| Calibre Wireless, Back (`CAL`) | 163,124 / 65,524, File Transfer on its Calibre row | 163,724 / 65,524, same |
+
+- **The re-read is cheap.** The language took 5 ms (Murphy) to 35 ms (X4 Pro), or 246-277 ms when the uploaded
+  pack was new and its flash slot was built; the UI look and the timezone 0-5 ms, the plugins 4-29 ms, the SD font
+  rediscovery 37-58 ms.
+- A screenshot during File Transfer returns the QR frame on these boards now: their framebuffers stay.
+- **Sleep from a running File Transfer takes the direct sleep path now, and it holds.** With the framebuffers kept,
+  `enterDeepSleep()` no longer restarts into sleep: the sleep path drops the radio, the server screen exits, and the
+  sleep picture is drawn. A long press of Power slept straight from File Transfer joined (X4 Pro, Murphy) and in
+  hotspot mode (X4 Pro); each woke normally on a press, with a clean `CMD:BOOTLOG`.
+
 ### Wi-Fi session end on an ESP32-S3 (Picco, 2026-11-27)
 
 Measured for the in-place return after a Wi-Fi screen (`wifi_session::end()`,

@@ -936,6 +936,11 @@ void applyUiFontScale() {
   }
 }
 
+void applyUiLook() {
+  applyUiFontScale();
+  UITheme::getInstance().reload();
+}
+
 namespace {
 void openUiBookFonts();  // syncUiBookFonts' opener, below
 }  // namespace

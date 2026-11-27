@@ -66,9 +66,10 @@ void CalibreConnectActivity::onEnter() {
 
 void CalibreConnectActivity::onExit() {
   Activity::onExit();
-  // Back leads to the File Transfer list (CrossPointWebServerActivity opens it again), so the
-  // restart lands there, on this row; it used to land on Home, also after a join backed out of.
-  // Any other way out (Home, a global action) replaces the stack and goes Home.
+  // Back leads to the File Transfer list on this row (CrossPointWebServerActivity opens it again
+  // there), so the restart lands there too; it used to land on Home, also after a join backed out
+  // of. Any other way out (Home, a global action) replaces the stack and goes Home. Where the
+  // session carries on, the queued navigation does either.
   session.end(leavingToFileTransfer ? silentRestartToFileTransferCalibre : silentRestart);
 }
 

@@ -46,9 +46,9 @@ class CrossPointWebServerActivity final : public Activity {
   int currentRssi = 0;
   unsigned long lastRssiUpdateTime = 0;
 
-  // Set after the first render completes and frame buffers are released.
-  // Subsequent render() calls return immediately — no display operations
-  // are possible after releaseFrameBuffers().
+  // Set once the server screen is on the panel, where it stays for the session: render() returns
+  // at once from then on. On the boards that restart after the session the frame buffers are
+  // released then too (releaseFrameBuffers()), and no display operation is possible.
   bool buffersReleased = false;
 
   void renderServerRunning() const;
@@ -56,7 +56,8 @@ class CrossPointWebServerActivity final : public Activity {
 
   void onNetworkModeSelected(NetworkMode mode);
   void onWifiSelectionComplete(bool connected);
-  // Unload SD fonts, paint the QR/URL screen, and release both frame buffers.
+  // Unload SD fonts, paint the QR/URL screen, and release both frame buffers where the session
+  // ends in a restart.
   // AP mode calls this before the WiFi stack starts so it gets the ~100KB of
   // headroom; STA mode calls it from startWebServer once the IP is known.
   void showServerScreenAndReleaseBuffers();
