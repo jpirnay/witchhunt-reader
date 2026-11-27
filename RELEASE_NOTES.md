@@ -2,6 +2,100 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.55 — 2026-11-27
+
+**Three new boards to try, fewer restarts after Wi-Fi, and touch that takes fewer taps.** Builds for the Xteink X4
+Classic, the Seeed reTerminal Sticky and the EEGO Reader A4 come with this release, marked experimental. On the boards
+with PSRAM, leaving a Wi-Fi screen no longer restarts the reader, and on every touch board one tap opens a list row and
+a swipe in from the left edge goes back.
+
+Read the upgrade notes at the end of this section before you update.
+
+### Experimental boards
+
+- **Xteink X4 Classic, Seeed reTerminal Sticky and EEGO Reader A4.** Every release now has a build for each:
+  `firmware-x4c.bin`, `firmware-sticky.bin` and `firmware-eego_a4.bin`, and a `full-install-…` image of each. They
+  are built from the board descriptions Witch Reader shares with CrossPoint, and **the developers have not run them on
+  the hardware**: a build may not start, sleep or wake properly. Back up the whole flash before the first install, and
+  [tell us](https://github.com/jpirnay/witchhunt-reader/issues) what works. See
+  [Experimental boards](USER_GUIDE.md#experimental-boards).
+- **The web flasher lists the X4 Classic and the EEGO A4**, with a warning when you pick one. The Sticky's USB port is
+  a serial bridge the flasher cannot see: the README gives the esptool commands.
+- **System Information** says **Board support: Experimental** on these boards, and their update check offers the next
+  release's build.
+- **On the EEGO A4** the reader reads the Power key the right way round (it is the only board whose key reads high
+  when pressed), switches the panel off between screens, as its own firmware does to keep the glass clean, and keeps
+  Wi-Fi to the 15 dBm its own firmware uses.
+
+### Touch
+
+- **One tap opens a list row** on a touch board set up from new: **Tap Action** now starts at **Activate
+  immediately**. A reader that saved a choice keeps it.
+- **A swipe in from the left edge goes back**, outside a book, on every touch board: most useful on the X4 Pro and
+  the BOOX Picco, which have no Back key, and on the LilyGo T5 S3, where Back is a hold of the Home key.
+- **Tap Zones + Swipe** (Settings → Controls → Touch Page Turn): taps on the outer thirds and horizontal swipes both
+  turn pages, one page per touch.
+- **A light button in the reader bars** (the sun beside the star) opens the light panel from a book, on the X4 Pro,
+  the LilyGo T5 S3 and the BOOX Picco.
+- Fix: a gesture bound to an action, such as a swipe to Go Home, fired while you moved the light panel's sliders.
+
+### Reading
+
+- **Line Spacing 80% and 85%**, two tighter steps.
+- **The reader menu's Sync tab is there before KOReader sync is set up** (X4 Pro, LilyGo T5 S3, Murphy M3, BOOX
+  Picco): its row opens the KOReader settings over the book, and with an account entered the tab offers pull, push and
+  compare.
+- **Text draws faster**: glyphs go onto the page eight rows at a time. On the BOOX Picco a text page's black-and-white
+  frame took 47 ms instead of 93.
+- **With the Sunlight Fading Fix on**, the X3 and X4 power the screen up while the page is drawn and no longer wait
+  for it to power down after a turn: on the X3 a page's upload took 105–117 ms instead of 183.
+- **On the BOOX Picco** the first page after it starts or wakes clears the screen first, so the sleep picture leaves
+  no trace (one refresh more), and the darker gray in a book's pictures is a shade lighter.
+
+### Settings and Wi-Fi
+
+- **No restart after Wi-Fi on the X4 Pro, LilyGo T5 S3, Murphy M3 and BOOX Picco.** Leaving File Transfer, Calibre
+  Wireless, the OPDS Browser, the Font Manager, Check for Updates, KOReader sync, Weather, Sync Time or the other
+  Wi-Fi settings turns Wi-Fi off and goes straight on while enough memory is free, and restarts as before only when it
+  is not. A language pack, theme or time zone sent from the web page is in use as soon as you leave. The X3 and X4
+  restart as before. See [Leaving a Wi-Fi screen](USER_GUIDE.md#365-leaving-a-wi-fi-screen).
+- **A new UI Theme or UI Font Size shows at once** on those four boards, while you are still in Settings.
+- **A message such as "Touch Lock: On" goes away after 2 s**, and the reading light, Dark Mode and Bionic Reading show
+  none: you see the change itself.
+- **Weather without a place set** says so and offers Weather Settings, instead of an error, and its Wi-Fi picker opens
+  upright.
+- **The LilyGo T5 S3's battery gauge is given its 1500 mAh cell**, which the gauge forgets when the battery runs flat,
+  so the percentage stays right afterwards.
+- **USB Drive checks every write the computer makes to the card**, and finishes the transfers in progress before the
+  reader takes the card back.
+- Fix: Sync Time and Detect Timezone could take Wi-Fi away from a KOReader sync running in the background, and opening
+  Wi-Fi Networks cut such a sync off. They now wait for it.
+- Fix: switching Settings tabs on the LilyGo T5 S3 left outlines of the old tab's labels.
+
+### Upgrade notes
+
+- **Check for updates on 2.51 to 2.54 installs 2.55.** On 2.38 to 2.50, install once by hand, as under 2.51.
+- **Books are not indexed again.** Only a book set to one of the new line spacings lays its chapters out again.
+- **Line Spacing is kept**: 2.55 numbers the steps anew and converts your setting and each book's own on the first
+  load. If you go back to 2.54, check Line Spacing.
+- **Tap Action** keeps a saved choice; only a touch board without saved settings starts on one tap.
+- **Languages:** the experimental boards' **Board support** row shows in English.
+- **Which file:** `firmware.bin` (X3, X4) or `firmware-<device>.bin` for the card (`x4pro`, `lilygo`, `murphy`,
+  `picco`, and the experimental `x4c`, `sticky`, `eego_a4`), `full-install-<device>.bin` at 0x0.
+
+### With thanks to
+
+- **trungtypo**, whose Metalio E-Ink4 Plus port (#855) brought the reader bars' light button, the Sync tab before an
+  account, the live UI theme, the left-edge Back swipe, one-tap lists, the weather screen's fixes and quiet gestures
+  over the light panel.
+- **Justin Mitchell** and **Uri Tauber**, who brought the X4 Classic, the Sticky and the EEGO A4 to CrossPoint
+  (crosspoint-reader #3279, #2481, #3887) and the Wi-Fi power cap (#3993), and the authors of the 53 Free-Ink changes
+  this release takes in: Justin Mitchell, Julia Nguyen, kanavnet, Uri Tauber, Marco Rojas, Josh-writes, Eszter
+  Schuffert, Jadehawk, Vladislav Zbrodov, Roman Fordinal and Aaron Splady.
+- **mirwena** (the message that stayed, #930) and **razlack** (tighter line spacing, #931).
+
+Source-level credits remain in the relevant files.
+
 ## 2.54 — 2026-11-25
 
 **A Home screen you arrange yourself, footnotes over the page, and library loans.** Lyra Tiles, the new default theme,
