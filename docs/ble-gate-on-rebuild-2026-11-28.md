@@ -42,3 +42,40 @@ No panic, abort or failed allocation in any of the runs. No HID remote was in pa
 - One start/stop in a book halves the largest block for the rest of the boot: whatever host, the C3 radio must start
   at most once per boot, into room reserved for it.
 - The boot gate (`bleInUse()` from a setting, reboot to enable) is worth 1.2 KB: not worth a reboot.
+
+## The single-buffer session (2026-11-28, second analysis' scheme D), X3, a real remote
+
+Build: this branch with the cut-down controller (`CONFIG_BT_CTRL_BLE_MAX_ACT=2`, no advertising or test mode, small
+scan caches), NimBLE one connection, the link commands of `spike/ble-s3-probe` and `CMD:BLE:FB=0|S|1` (release the
+secondary framebuffer / keep it released / take it back). `RAM:` 69,468 B, `Flash:` 6,403,073 B (97.7 % of the slot).
+Remote: a Free2 on Kobo/PC firmware ("Free2-M"), its connection parameters accepted (`CMD:BLE:PARAMS=1`).
+
+M1, in `alice-illustrated.epub`, free / largest block:
+
+| | free | largest |
+|---|---|---|
+| reader, two framebuffers, radio off | 59,692 | 55,284 |
+| secondary released | 112,864 | 55,284 |
+| + NimBLE host up | 61,892 | 55,284 |
+| + the Free2 bonded and linked (4.0 s) | 58,304 | 55,284 |
+
+The radio's 51 KB lands in the released block's hole; the reader's 55 KB block stays whole.
+
+M2, the soak book (`Through the Brazilian Wilderness.epub`, cache deleted), the secondary kept released, NimBLE up,
+the Free2 linked, 30 page turns and three chapter jumps: **fails**.
+
+- The reader fights the session: opening the book reallocates the secondary (leaving a 3,956 B largest block), and
+  with it gone again the reader retries the realloc on every render (345 failed attempts), evicting caches and
+  dropping Background-B each time.
+- Builds have no scratch: 19 parses aborted (largest block 3-6 KB), 6 pictures dropped (`Inflate ring alloc failed:
+  need 32768 contiguous bytes (scratch arena: none supplied)`), several chapters with 0 pages. Lowest free since boot
+  4,972 B.
+- The link: 13 drops by supervision timeout (reason 0x208, the remote's 6 s) during builds; reconnects failed at
+  service discovery ("no HID service") until the builds stopped.
+- After the session: radio stopped, 113,272 B free but a 40,948 B largest block; the secondary cannot come back
+  until a reboot.
+
+What it decides: releasing the secondary is not enough. Scheme D needs builds (and picture decodes) that run inside
+the write buffer while the old page stays on the glass, a reader that knows the session (no realloc retries), the
+radio's memory kept out of the general heap (a pool in the released block, so the heap keeps its shape), and a link
+supervision timeout above the longest build stall (the SDK's own 8 s, not the remote's 6 s).

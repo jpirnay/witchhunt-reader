@@ -810,7 +810,7 @@ ASSERT(((_iram_end - ORIGIN(iram_text_seg)) <= LENGTH(iram_text_seg)),
  *libfreertos.a:queue.*(.literal.xQueueGetMutexHolder .text.xQueueGetMutexHolder)
  *libfreertos.a:queue.*(.literal.xQueueRemoveFromSet .text.xQueueRemoveFromSet)
  *libfreertos.a:queue.*(.literal.xQueueSelectFromSet .text.xQueueSelectFromSet)
- *libfreertos.a:stream_buffer.*(.literal.prvInitialiseNewStreamBuffer .text.prvInitialiseNewStreamBuffer)
+ *libfreertos.a:stream_buffer.*(.literal.prvInitialiseNewStreamBuffer .text.prvInitialiseNewStreamBuffer .text.prvInitialiseNewStreamBuffer.isra.0)
  *libfreertos.a:stream_buffer.*(.literal.prvReadBytesFromBuffer .text.prvReadBytesFromBuffer)
  *libfreertos.a:stream_buffer.*(.literal.prvWriteBytesToBuffer .text.prvWriteBytesToBuffer)
  *libfreertos.a:stream_buffer.*(.literal.ucStreamBufferGetStreamBufferType .text.ucStreamBufferGetStreamBufferType)

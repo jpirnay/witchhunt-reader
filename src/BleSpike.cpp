@@ -5,6 +5,13 @@
 // CMD:BLE:CTRL_OFF  controller disable + deinit.
 // CMD:BLE:HOST      the SDK's BleKeyboardHost (NimBLE-Arduino's host on the same controller): begin, a 3 s scan.
 // CMD:BLE:HOST_OFF  BleHid.end().
+// Link test with a real remote (the host stays up between commands, polled from SerialTestApi::service()):
+// CMD:BLE:SCAN[=ms]        scan, list named or HID devices [addr|name|rssi|type|hid|connectable].
+// CMD:BLE:CONNECT=addr     connect and bond (Just Works); waits up to 30 s.
+// CMD:BLE:RECONNECT[=ms]   begin() if down, arm the bonded reconnect, wait for the link: a radio restart.
+// CMD:BLE:KEYS[=ms]        wait, then return and clear the log: link up/down, link_ms, keys, raw edges, times.
+// CMD:BLE:LINK, FORGET=addr, DISCONNECT, PARAMS=0|1 (accept the remote's connection parameters).
+// CMD:BLE:FB=0|S|1         release the secondary framebuffer once / keep it released (session) / take it back.
 // CMD:BLE:KEEP=0|1  whether the next boot keeps the controller's memory (initArduino() releases it when bleInUse()
 //                   says no); takes effect after CMD:REBOOT. CMD:BLE:MEM reports the current state.
 //
@@ -15,6 +22,8 @@
 // HOST both report run_in_flash/irq_iram_cleared, the proof that the stand-ins took effect.
 #include <Arduino.h>
 #include <BleKeyboardHost.h>
+#include <GfxRenderer.h>
+#include <HalSystem.h>
 #include <esp32-hal-bt.h>
 #include <esp_bt.h>
 #include <esp_heap_caps.h>
@@ -24,10 +33,15 @@
 #include <nvs.h>
 
 #include <atomic>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <string_view>
+
+#include "activities/RenderLock.h"
+
+extern GfxRenderer renderer;  // main.cpp
 
 // Strong override of the core's weak bleInUse() (esp32-hal-bt.c): initArduino() calls it right after
 // nvs_flash_init() and releases the controller's memory for good when it returns false. Read from NVS, so one
@@ -45,6 +59,9 @@ extern "C" bool bleInUse(void) {
 #ifndef BLE_SPIKE_FLASH_CTRL
 #define BLE_SPIKE_FLASH_CTRL 0
 #endif
+
+void bleSpikeAcceptConnParams(bool on);  // freeink-sdk BleKeyboardHost.cpp (spike copy only)
+bool bleSpikeConnParams(uint16_t& interval, uint16_t& latency, uint16_t& timeout);
 
 namespace {
 // Controller interrupts whose IRAM flag the wrapper below cleared (flash-only controller only).
@@ -244,12 +261,267 @@ std::string hostOff() {
     if (!done) delay(50);
   }
   appendNumber(out, "ended", done ? 1 : 0);
+  appendNumber(out, "end_ms", static_cast<long>(millis() - t0));
   appendHeap(out, "off");
   appendMin(out);
   return out;
 }
 
+// ---- Link test with a real remote (S3 probe) -------------------------------------------------------------------
+// The log below is filled by bleSpikeService() (called from SerialTestApi::service() on the loop task, and from the
+// wait loops of the commands, which run on the same task) and emptied by CMD:BLE:KEYS. Nothing else touches it.
+
+void appendInternal(std::string& out, const char* tag) {
+  constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  char buf[64];
+  snprintf(buf, sizeof(buf), " %s=%lu/%lu", tag, static_cast<unsigned long>(heap_caps_get_free_size(caps)),
+           static_cast<unsigned long>(heap_caps_get_largest_free_block(caps)));
+  out += buf;
+}
+
+struct LogEntry {
+  uint32_t atMs;
+  char text[44];
+};
+constexpr int kLogLen = 64;
+LogEntry logRing[kLogLen];
+int logCount = 0;
+uint32_t logDropped = 0;
+bool lastConnected = false;
+uint32_t armedAtMs = 0;  // start of the last CONNECT or RECONNECT; 0 once its link came up
+
+__attribute__((format(printf, 1, 2))) void logEvent(const char* format, ...) {
+  if (logCount == kLogLen) {
+    ++logDropped;
+    return;
+  }
+  LogEntry& entry = logRing[logCount++];
+  entry.atMs = millis();
+  va_list args;
+  va_start(args, format);
+  vsnprintf(entry.text, sizeof(entry.text), format, args);
+  va_end(args);
+}
+
+// FB=S: the single-buffer session. The secondary framebuffer is released again whenever it is back (a new reader
+// activity, Home), as the radio owner of the analysis' scheme D would keep it while a remote is in use.
+bool fbSession = false;
+uint32_t fbSessionReleases = 0;
+
+void serviceFbSession() {
+  if (!fbSession || !renderer.hasSecondaryBuffer()) return;
+  RenderLock lock;
+  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
+    ++fbSessionReleases;
+    logEvent("fb released (session) free=%lu", static_cast<unsigned long>(esp_get_free_heap_size()));
+  }
+}
+
+void serviceLink() {
+  serviceFbSession();
+  if (!BleHid.isRunning()) {
+    lastConnected = false;
+    return;
+  }
+  BleHid.poll();
+  const bool connected = BleHid.isConnected();
+  if (connected != lastConnected) {
+    lastConnected = connected;
+    if (connected) {
+      logEvent("up %s", BleHid.connectedName());
+      if (armedAtMs != 0) {
+        logEvent("link_ms=%lu", static_cast<unsigned long>(millis() - armedAtMs));
+        armedAtMs = 0;
+      }
+    } else {
+      logEvent("down");
+    }
+  }
+  char failure[48];
+  if (BleHid.takeConnectFailure(failure, sizeof(failure))) logEvent("fail %.36s", failure);
+  uint32_t passkey = 0;
+  if (BleHid.takePairingPasskey(passkey)) logEvent("passkey %06lu", static_cast<unsigned long>(passkey));
+  freeink::KeyEvent key;
+  while (BleHid.popKey(key))
+    logEvent("key kc=%02x sp=%u ch=%u m=%02x", key.keycode, static_cast<unsigned>(key.special),
+             static_cast<unsigned>(static_cast<uint8_t>(key.ch)), key.mods);
+  freeink::RawButtonEvent raw;
+  while (BleHid.popRawButton(raw))
+    logEvent("raw %06lx %s%s @%lu", static_cast<unsigned long>(raw.code()), raw.pressed ? "dn" : "up",
+             raw.wasRest ? " rest" : "", static_cast<unsigned long>(raw.atMs));
+}
+
+// Services the link for up to `ms`, or until done() says so.
+template <typename Done>
+void serviceFor(const uint32_t ms, Done done) {
+  const uint32_t t0 = millis();
+  while (millis() - t0 < ms) {
+    serviceLink();
+    HalSystem::feedWatchdog();
+    if (done()) return;
+    delay(10);
+  }
+}
+
+uint32_t parseMs(const std::string_view value, const uint32_t fallback, const uint32_t cap) {
+  if (value.empty()) return fallback;
+  uint32_t ms = 0;
+  for (const char c : value) {
+    if (c < '0' || c > '9') return fallback;
+    ms = ms * 10 + static_cast<uint32_t>(c - '0');
+    if (ms > cap) return cap;
+  }
+  return ms;
+}
+
+// begin() when the host is down; its time in begin_ms (0 when it was already up).
+bool ensureHost(std::string& out) {
+  if (BleHid.isRunning()) {
+    appendNumber(out, "begin_ms", 0);
+    return true;
+  }
+  const uint32_t t0 = millis();
+  const bool begun = BleHid.begin("WitchSpike");
+  appendNumber(out, "begin_ms", static_cast<long>(millis() - t0));
+  if (!begun) out += " error=begin_failed";
+  return begun;
+}
+
+std::string scan(const std::string_view value) {
+  std::string out = "BLE_SCAN:";
+  if (!ensureHost(out)) return out;
+  const uint32_t ms = parseMs(value, 8000, 30000);
+  BleHid.startScan(ms);
+  serviceFor(ms + 500, [] { return false; });
+  BleHid.stopScan();
+  appendNumber(out, "devices", BleHid.deviceCount());
+  for (uint8_t i = 0; i < BleHid.deviceCount(); ++i) {
+    const freeink::DiscoveredDevice& d = BleHid.device(i);
+    if (!d.hid && !d.hasName) continue;  // keep the reply to what could be a remote
+    char buf[96];
+    snprintf(buf, sizeof(buf), " [%s|%s|%d|t%u|hid%d|c%d]", d.addr, d.name, d.rssi, d.addrType, d.hid ? 1 : 0,
+             d.connectable ? 1 : 0);
+    out += buf;
+  }
+  appendInternal(out, "internal");
+  return out;
+}
+
+std::string connectTo(const std::string_view addr) {
+  std::string out = "BLE_CONNECT:";
+  if (addr.size() != 17) return out + " error=address";
+  if (!ensureHost(out)) return out;
+  char address[18];
+  memcpy(address, addr.data(), 17);
+  address[17] = '\0';
+  armedAtMs = millis();
+  const uint32_t t0 = armedAtMs;
+  const bool started = BleHid.connect(address);
+  appendNumber(out, "started", started ? 1 : 0);
+  serviceFor(30000, [] { return BleHid.isConnected(); });
+  appendNumber(out, "connected", BleHid.isConnected() ? 1 : 0);
+  appendNumber(out, "ms", static_cast<long>(millis() - t0));
+  out += " name=";
+  out += BleHid.connectedName();
+  appendNumber(out, "bonds", BleHid.pairedCount());
+  appendInternal(out, "internal");
+  return out;
+}
+
+// Starts the host if it is down and arms the bonded reconnect: the restart a reader would do after stopping the
+// radio. link_ms in the log counts from the arm.
+std::string reconnect(const std::string_view value) {
+  std::string out = "BLE_RECONNECT:";
+  if (!ensureHost(out)) return out;
+  armedAtMs = millis();
+  const uint32_t t0 = armedAtMs;
+  const bool armed = BleHid.armBondedReconnect(freeink::PickPolicy::First, nullptr);
+  appendNumber(out, "armed", armed ? 1 : 0);
+  serviceFor(parseMs(value, 30000, 125000), [] { return BleHid.isConnected(); });
+  appendNumber(out, "connected", BleHid.isConnected() ? 1 : 0);
+  appendNumber(out, "ms", static_cast<long>(millis() - t0));
+  appendInternal(out, "internal");
+  return out;
+}
+
+std::string keys(const std::string_view value) {
+  serviceFor(parseMs(value, 0, 120000), [] { return false; });
+  serviceLink();
+  std::string out = "BLE_KEYS:";
+  appendNumber(out, "now", static_cast<long>(millis()));
+  appendNumber(out, "connected", BleHid.isConnected() ? 1 : 0);
+  for (int i = 0; i < logCount; ++i) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), " [%lu %s]", static_cast<unsigned long>(logRing[i].atMs), logRing[i].text);
+    out += buf;
+  }
+  appendNumber(out, "dropped", static_cast<long>(logDropped));
+  logCount = 0;
+  logDropped = 0;
+  return out;
+}
+
+std::string link() {
+  std::string out = "BLE_LINK:";
+  appendNumber(out, "running", BleHid.isRunning() ? 1 : 0);
+  appendNumber(out, "connected", BleHid.isConnected() ? 1 : 0);
+  appendNumber(out, "connecting", BleHid.isConnecting() ? 1 : 0);
+  out += " name=";
+  out += BleHid.connectedName();
+  out += " addr=";
+  out += BleHid.connectedAddr();
+  uint16_t interval = 0, latency = 0, timeout = 0;
+  if (bleSpikeConnParams(interval, latency, timeout)) {
+    appendNumber(out, "itvl", interval);
+    appendNumber(out, "latency", latency);
+    appendNumber(out, "timeout", timeout);
+  }
+  appendNumber(out, "bonds", BleHid.pairedCount());
+  for (uint8_t i = 0; i < BleHid.pairedCount(); ++i) {
+    out += " [";
+    out += BleHid.paired(i).addr;
+    out += '|';
+    out += BleHid.paired(i).name;
+    out += ']';
+  }
+  appendInternal(out, "internal");
+  appendMin(out);
+  return out;
+}
+
+std::string forget(const std::string_view addr) {
+  if (addr.size() != 17) return "BLE_FORGET: error=address";
+  char address[18];
+  memcpy(address, addr.data(), 17);
+  address[17] = '\0';
+  BleHid.forget(address);
+  return link();
+}
+
+// CMD:BLE:FB=0|1: release the secondary framebuffer (the reader then runs single-buffer: no AA, no pre-render) or
+// take it back, under the render lock. The single-buffer remote session of the C3 analysis.
+std::string framebuffer(const std::string_view value) {
+  std::string out = "BLE_FB:";
+  appendHeap(out, "pre");
+  fbSession = value == "S";
+  bool ok = false;
+  {
+    RenderLock lock;
+    ok = value == "1" ? renderer.reallocSecondaryBuffer()
+                      : (!renderer.hasSecondaryBuffer() || renderer.releaseSecondaryBuffer());
+  }
+  appendNumber(out, "session", fbSession ? 1 : 0);
+  appendNumber(out, "session_releases", static_cast<long>(fbSessionReleases));
+  appendNumber(out, "ok", ok ? 1 : 0);
+  appendNumber(out, "has_secondary", renderer.hasSecondaryBuffer() ? 1 : 0);
+  appendHeap(out, "post");
+  appendMin(out);
+  return out;
+}
+
 }  // namespace
+
+void bleSpikeService() { serviceLink(); }
 
 std::string memState(const char* head) {
   std::string out = head;
@@ -281,5 +553,25 @@ std::string bleSpikeRun(const std::string_view arg) {
   if (arg == "CTRL_OFF") return controllerOff();
   if (arg == "HOST") return hostOn();
   if (arg == "HOST_OFF") return hostOff();
-  return "BLE_ERROR:expected CTRL, CTRL_OFF, HOST or HOST_OFF";
+  if (btMemReleased(BT_MODE_BLE)) return "BLE_ERROR:controller memory released at boot";
+  const size_t eq = arg.find('=');
+  const std::string_view name = arg.substr(0, eq);
+  const std::string_view value = eq == std::string_view::npos ? std::string_view() : arg.substr(eq + 1);
+  if (name == "SCAN") return scan(value);
+  if (name == "CONNECT") return connectTo(value);
+  if (name == "RECONNECT") return reconnect(value);
+  if (name == "KEYS") return keys(value);
+  if (name == "LINK") return link();
+  if (name == "FORGET") return forget(value);
+  if (name == "FB") return framebuffer(value);
+  if (name == "PARAMS") {  // accept (1) or reject (0) the peripheral's connection-parameter requests
+    bleSpikeAcceptConnParams(value == "1");
+    return std::string("BLE_PARAMS: accept=") + (value == "1" ? "1" : "0");
+  }
+  if (name == "DISCONNECT") {
+    BleHid.disconnect();
+    return link();
+  }
+  return "BLE_ERROR:expected CTRL, CTRL_OFF, HOST, HOST_OFF, SCAN[=ms], CONNECT=addr, RECONNECT[=ms], KEYS[=ms], "
+         "LINK, FORGET=addr or DISCONNECT";
 }
