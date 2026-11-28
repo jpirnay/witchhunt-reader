@@ -5,7 +5,7 @@ import os
 
 Import("env")  # noqa: F821
 
-_flags = ["-DFREEINK_CAP_BLE_HID_HOST=1", "-DCONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1",
+_flags = ["-DFREEINK_CAP_BLE_HID_HOST=1", "-DFREEINK_BLE_HID_SCAN_DEBUG=1", "-DCONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1",
           "-DCONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1",
           "-include", os.path.join(env.subst("$PROJECT_DIR"), "scripts", "s3_nimble_psram.h")]  # noqa: F821
 _markers = ("nimble-arduino", "blekeyboardhost", "blespike.cpp")

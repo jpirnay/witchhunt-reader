@@ -54,6 +54,9 @@ extern "C" bool bleInUse(void) {
 #define BLE_SPIKE_FLASH_CTRL 0
 #endif
 
+void bleSpikeAcceptConnParams(bool on);  // freeink-sdk BleKeyboardHost.cpp (spike copy only)
+bool bleSpikeConnParams(uint16_t& interval, uint16_t& latency, uint16_t& timeout);
+
 namespace {
 // Controller interrupts whose IRAM flag the wrapper below cleared (flash-only controller only).
 std::atomic<uint32_t> irqFlagsCleared{0};
@@ -446,6 +449,12 @@ std::string link() {
   out += BleHid.connectedName();
   out += " addr=";
   out += BleHid.connectedAddr();
+  uint16_t interval = 0, latency = 0, timeout = 0;
+  if (bleSpikeConnParams(interval, latency, timeout)) {
+    appendNumber(out, "itvl", interval);
+    appendNumber(out, "latency", latency);
+    appendNumber(out, "timeout", timeout);
+  }
   appendNumber(out, "bonds", BleHid.pairedCount());
   for (uint8_t i = 0; i < BleHid.pairedCount(); ++i) {
     out += " [";
@@ -512,6 +521,10 @@ std::string bleSpikeRun(const std::string_view arg) {
   if (name == "KEYS") return keys(value);
   if (name == "LINK") return link();
   if (name == "FORGET") return forget(value);
+  if (name == "PARAMS") {  // accept (1) or reject (0) the peripheral's connection-parameter requests
+    bleSpikeAcceptConnParams(value == "1");
+    return std::string("BLE_PARAMS: accept=") + (value == "1" ? "1" : "0");
+  }
   if (name == "DISCONNECT") {
     BleHid.disconnect();
     return link();
