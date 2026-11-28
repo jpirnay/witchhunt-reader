@@ -27,6 +27,10 @@ The shaping itself is the reference page `docs/text-shaping.md`.
 it, the one `NorFlash` interface they go through, and its backends, the `spiffs` partition and an image in PSRAM kept as
 a file on the card for a board without that partition.
 
+`c3-core-rebuild.md` is the record of the ESP32-C3 envs' Arduino core rebuild (`[firmware_tuned]`): the
+options it compiles out and why, what it measured on the X3 (flash and heap), what it leaves out, and how to work
+with it (the per-chip cache, regenerating the IRAM budget's linker script, the traps).
+
 `reader-priority-scheme.md` is the record of the reader's priority scheme: the complete page first, then the page's own
 pictures, then everything else, with input above all. Section 3 holds the rules R0-R8 (`InputFirst.h` cites R0,
 `test/page_gray_during_build/BuildPageGrayTest.cpp` R2); section 4 what each panel controller reads from the host's
