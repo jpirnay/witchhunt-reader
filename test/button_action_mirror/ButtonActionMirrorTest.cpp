@@ -96,6 +96,7 @@ TEST(StoredButtonAction, NamesAreStable) {
       {S::BTN_LIGHT_PANEL, "lightPanel"},
       {S::BTN_LIGHT_WARMER, "lightWarmer"},
       {S::BTN_LIGHT_COOLER, "lightCooler"},
+      {S::BTN_TOGGLE_BLE_REMOTE, "toggleBleRemote"},
   };
   for (const auto& entry : STORED) {
     EXPECT_STREQ(entry.name, ButtonActionNames::name(entry.action)) << int(entry.action);

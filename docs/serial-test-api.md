@@ -733,17 +733,20 @@ CMD:BLE:OFF
 ```
 
 Only in builds that link a Bluetooth LE host (`HalCapabilities::hasBleRadio()`: the S3 dev envs, `[ble_s3]` in
-`platformio.ini`); elsewhere the command does not exist. `ON` asks the radio's owner (`src/BleRadio.h`) to start it,
-`OFF` to stop it, and both report its state the way a bare `CMD:BLE` does:
+`platformio.ini`); elsewhere the command does not exist. `ON` asks the radio's owner (`src/BleRadio.h`) to start it
+and keep it up whatever the Bluetooth Remote setting says; `OFF` stops it, and a radio the setting wants (on, with a
+remote saved) starts again on the next pass. Both report its state the way a bare `CMD:BLE` does:
 
 `BLE:result=<start result> on=0|1 stopping=0|1 linked=0|1 connecting=0|1 bonds=<n> starts=<n> refusals=<n>
 last_start=<result> last_stop=<reason> begin_ms=<ms> end_ms=<ms> before=<free>/<largest> after=<free>/<largest>
-internal=<free>/<largest> cpu=<MHz> hold=0|1 rej_radio=<n>`
+internal=<free>/<largest> cpu=<MHz> hold=0|1 rej_radio=<n> setting=0|1 swap=0|1 saved=<n> idle=0|1 wifi_paused=0|1`
 
 `result` is empty unless `ON` asked for a start: `Started`, `AlreadyOn`, `HeapLow`, `HeapInPieces`, `RolledBack`,
 `StorageBusy`, `BeginFailed`, `Stopping` (`src/BleRadioPolicy.h` has the rules); `last_start` is `None` until the
 first `ON` after a boot, `last_stop` names why the radio last went down (`Requested`, `IdleNoLink`, `Sleep`,
-`ExclusiveStorage`, `RolledBack`). `before`/`after` are internal RAM
+`ExclusiveStorage`, `RolledBack`, `Unwanted`, `WifiOn`). `setting` and `swap` are the Bluetooth Remote and Swap Remote
+Keys settings, `saved` the remotes bonded on the device, `idle` a stop for idleness not yet woken, `wifi_paused` a
+wanted radio held off while Wi-Fi is up. `before`/`after` are internal RAM
 around the last `begin()`, `internal` now. `hold` says whether the power manager holds the clock for the radio
 (`HalPowerManager::setRadioActive`); with it set `cpu` stays at full speed and `rej_radio` counts the light-sleep
 slices the radio declined.

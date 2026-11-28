@@ -2004,7 +2004,8 @@ void cmdImu(std::string_view /*arg*/) {
 }
 
 #if FREEINK_CAP_BLE_HID_HOST
-// CMD:BLE[:ON|:OFF]: the Bluetooth LE radio's owner (src/BleRadio.h), started, stopped or only reported.
+// CMD:BLE[:ON|:OFF]: the Bluetooth LE radio's owner (src/BleRadio.h), started, stopped or only reported. ON keeps the
+// radio up whatever the Bluetooth Remote setting says; OFF ends that, and a radio the setting wants starts again.
 void cmdBle(const std::string_view arg) {
   const char* result = "";
   if (arg == "ON") {
@@ -2021,6 +2022,7 @@ void cmdBle(const std::string_view arg) {
   char a[96];
   char b[160];
   char c[96];
+  char d[96];
   snprintf(a, sizeof(a), "BLE:result=%s on=%d stopping=%d linked=%d connecting=%d bonds=%u starts=%lu refusals=%lu",
            result, s.on ? 1 : 0, s.stopping ? 1 : 0, s.linked ? 1 : 0, s.connecting ? 1 : 0,
            static_cast<unsigned>(s.bonds), static_cast<unsigned long>(s.starts),
@@ -2035,9 +2037,14 @@ void cmdBle(const std::string_view arg) {
            static_cast<unsigned>(heap_caps_get_largest_free_block(caps)),
            static_cast<unsigned long>(getCpuFrequencyMhz()), powerManager.radioActive() ? 1 : 0,
            static_cast<unsigned long>(powerManager.lightSleepStats().rejRadio));
+  // The setting the radio follows, and why it may be off (BleRadioPolicy::decide).
+  snprintf(d, sizeof(d), " setting=%d swap=%d saved=%u idle=%d wifi_paused=%d", SETTINGS.bleRemote ? 1 : 0,
+           SETTINGS.bleSwapKeys ? 1 : 0, static_cast<unsigned>(BleRadio::savedRemoteCount()), s.idleStopped ? 1 : 0,
+           s.wifiPaused ? 1 : 0);
   std::string line = a;
   line += b;
   line += c;
+  line += d;
   reply(line);
 }
 #endif

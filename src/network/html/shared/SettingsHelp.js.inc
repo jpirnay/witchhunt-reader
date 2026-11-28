@@ -134,6 +134,8 @@ const SETTINGS_HELP = {
     "gestPinchOut": "Action for spreading two fingers apart; by default larger text.",
     "gestRotateCw": "Action for turning two fingers clockwise; by default it changes the orientation forward.",
     "gestRotateCcw": "Action for turning two fingers anticlockwise; by default it changes the orientation back.",
+    "bleRemote": "Lets a paired Bluetooth page turner turn pages. Pair one on the device: Settings, Controls, Bluetooth Remote. The radio waits while Wi-Fi is on.",
+    "bleSwapKeys": "Swaps the two page keys of a Bluetooth remote that turns the wrong way.",
     "tiltPageTurn": "Turns pages when you flick the device: a quick tilt and back.",
     "tiltAxis": "Which flick turns pages: a twist to the left or right, or the top edge tipped forward (away from you) or back.",
     "tiltPositiveAction": "What a flick to the right, or forward, does: nothing, next page or previous page.",

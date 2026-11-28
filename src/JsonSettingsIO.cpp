@@ -468,7 +468,14 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
         // getEnumOptionCount(), not enumValues.size(): a row that carries enumLabels instead of
         // translated StrIds (the font-size rows) has no enumValues at all, and bounding on that
         // rejected every value including the stored one.
-        v = clamp(v, info.getEnumOptionCount(), fieldDefault);
+        //
+        // A row whose options store other values (a button action row) keeps a value only when this board offers it:
+        // a card moved from a lit board keeps no light action on an unlit one.
+        if (info.enumOptionOfValueFn) {
+          v = info.enumOptionOf(v) >= 0 ? v : fieldDefault;
+        } else {
+          v = clamp(v, info.getEnumOptionCount(), fieldDefault);
+        }
       } else if (info.type == SettingType::TOGGLE) {
         v = clamp(v, (uint8_t)2, fieldDefault);
       } else if (info.type == SettingType::VALUE) {

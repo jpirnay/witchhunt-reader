@@ -42,7 +42,8 @@ std::string SettingInfo::getDisplayValue() const {
       // cannot disagree about what option `value` is. They used to be two copies of the same
       // two-way choice between enumValues and enumLabels, and a row carrying a third form
       // (enumLiteralLabelFn) rendered blank here while listing perfectly well in the picker.
-      return getEnumOptionLabel(value);
+      const int option = enumOptionOf(value);
+      return option < 0 ? std::string{} : getEnumOptionLabel(static_cast<uint8_t>(option));
     }
     case SettingType::VALUE: {
       if (valuePtr) return std::to_string(SETTINGS.*(valuePtr));
@@ -76,10 +77,15 @@ void SettingInfo::toggleValue() const {
       // a no-op -- invisible while the row opens a picker, wrong the moment one does not.
       const uint8_t count = getEnumOptionCount();
       if (count == 0) break;
+      // By option, so a row whose options store other values (withOptionValues) steps to the next one it offers.
+      const auto next = [this, count](const uint8_t value) {
+        const int option = enumOptionOf(value);
+        return enumValueOf(static_cast<uint8_t>(option < 0 ? 0 : (option + 1) % count));
+      };
       if (valuePtr) {
-        SETTINGS.*(valuePtr) = (SETTINGS.*(valuePtr) + 1) % count;
+        SETTINGS.*(valuePtr) = next(SETTINGS.*(valuePtr));
       } else if (valueGetter && valueSetter) {
-        callValueSetter((callValueGetter() + 1) % count);
+        callValueSetter(next(callValueGetter()));
       }
       break;
     }

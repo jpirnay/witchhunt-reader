@@ -46,6 +46,7 @@
 
 #include "BleRadio.h"
 #include "BootDiagnostics.h"
+#include "ButtonActionCaps.h"
 #include "ButtonEventManager.h"
 #include "CjkUiFonts.h"
 #include "CjkUiPack.h"
@@ -1766,8 +1767,7 @@ void setup() {
   // does not offer it here). By the profile, as the settings list offers the light
   // actions: a light that did not answer this boot's begin() (the BOOX Picco's is
   // probed on I2C) would otherwise lose its bindings for good with the next save.
-  CrossPointSettings::dropUnsupportedActions(SETTINGS, HalCapabilities::hasFrontlight(),
-                                             HalCapabilities::hasColorTemperature());
+  CrossPointSettings::dropUnsupportedActions(SETTINGS, ButtonActionOptions::boardCaps());
   // Navigation follows the screen, not the panel: rotating the device rotates which physical
   // button means "up". The input layer sits below the renderer and so cannot ask it directly —
   // this bridges the two, and is queried live so it can never go stale.
@@ -2056,7 +2056,9 @@ void loop() {
     // transitioning, so there is no path out of here that we need to service.
     mappedInputManager.update();
     // A Bluetooth LE radio still up stops now, and none starts while the host has the card.
-    BleRadio::service(/*exclusiveStorage=*/true);
+    BleRadio::Scene bleScene;
+    bleScene.exclusiveStorage = true;
+    BleRadio::service(bleScene);
     activityManager.loop();
     if (activityManager.preventAutoSleep()) {
       // A host is attached: keep the clock up so MSC callbacks stay responsive.
@@ -2073,8 +2075,16 @@ void loop() {
 
   // After the exclusive-storage return: it saves settings to the card.
   applySlideSwitch();
-  // The Bluetooth LE radio's pass (src/BleRadio.h): the SDK's poll, and its stop after an idle time with no remote.
-  BleRadio::service(/*exclusiveStorage=*/false);
+  // The Bluetooth LE radio's pass (src/BleRadio.h): it follows the Bluetooth Remote setting, waits while Wi-Fi is up,
+  // and polls the SDK.
+  {
+    BleRadio::Scene bleScene;
+    bleScene.wanted = SETTINGS.bleRemote != 0;
+    bleScene.wifiOn = WiFi.getMode() != WIFI_MODE_NULL;
+    bleScene.inReader = activityManager.isReaderActivity();
+    bleScene.localKey = gpio.wasAnyReleased();
+    BleRadio::service(bleScene);
+  }
 
   // The UI touch gate, refreshed every tick from the settings and the activity on
   // top (TouchGate.h). Touch Lock silences everything. Otherwise the reader keeps
@@ -2455,6 +2465,24 @@ void loop() {
           // changing the colour of a light that is off says nothing about
           // wanting it lit, and it would be a surprising way to blind someone.
           SETTINGS.saveToFile();
+          break;
+        }
+        // Bluetooth Remote on or off. Switching on with no remote saved opens the Bluetooth Remote screen on its
+        // search: pairing is what comes next, and a radio with nothing saved has nothing to reconnect to.
+        // Offered only where a BLE host is linked (ButtonActionOptions.h), and compiled only there: against BleRadio's
+        // stubs the check below would be constant.
+        case BA::BTN_TOGGLE_BLE_REMOTE: {
+#if FREEINK_CAP_BLE_HID_HOST
+          const bool on = SETTINGS.bleRemote == 0;
+          SETTINGS.bleRemote = on ? 1 : 0;
+          SETTINGS.saveToFile();
+          LOG_INF("MAIN", "Bluetooth remote %s", on ? "on" : "off");
+          if (on && BleRadio::savedRemoteCount() == 0) {
+            activityManager.openBleRemote(/*search=*/true);
+          } else {
+            ToggleNotice::show(StrId::STR_BLE_REMOTE, on, /*afterFrame=*/false);
+          }
+#endif
           break;
         }
         case BA::BTN_IGNORE:

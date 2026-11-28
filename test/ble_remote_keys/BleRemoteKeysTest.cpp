@@ -21,20 +21,20 @@ Edge release(const uint32_t code, const uint32_t atMs, const bool wasRest = fals
 }  // namespace
 
 // The keys CrossPoint's remotes turn pages with (lib/BlePageTurner, pageActionFor): Enter, Backspace and the consumer
-// track keys too. The volume pair is the other way round there.
+// track keys too, and Volume Up forward as there.
 TEST(BleRemoteKeys, KeyboardAndConsumerKeysTurnPages) {
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x4F), Target::PageForward);  // Right Arrow
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x51), Target::PageForward);  // Down Arrow
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x4E), Target::PageForward);  // Page Down
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x2C), Target::PageForward);  // Space
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x28), Target::PageForward);  // Enter
-  EXPECT_EQ(BleRemoteKeys::targetForUsage(0xEA), Target::PageForward);  // Volume Down
+  EXPECT_EQ(BleRemoteKeys::targetForUsage(0xE9), Target::PageForward);  // Volume Up
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0xB5), Target::PageForward);  // Scan Next Track
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x50), Target::PageBack);     // Left Arrow
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x52), Target::PageBack);     // Up Arrow
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x4B), Target::PageBack);     // Page Up
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x2A), Target::PageBack);     // Backspace
-  EXPECT_EQ(BleRemoteKeys::targetForUsage(0xE9), Target::PageBack);     // Volume Up
+  EXPECT_EQ(BleRemoteKeys::targetForUsage(0xEA), Target::PageBack);     // Volume Down
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0xB6), Target::PageBack);     // Scan Previous Track
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x04), Target::None);         // 'a'
   EXPECT_EQ(BleRemoteKeys::targetForUsage(0x00), Target::None);

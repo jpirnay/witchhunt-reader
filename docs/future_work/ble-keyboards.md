@@ -70,8 +70,8 @@ From CrossPoint's issues, PRs and code (`upstream/develop`, 2026-11-28). What ea
 | IINE Gamebrick, a video ring | not recorded | work (#2418, disc. #117) | not known |
 
 CrossPoint's default keys (`pageActionFor`): Left, Page Up, Up, Backspace, Volume Down, Scan Previous back; Right, Page
-Down, Down, Space, Enter, Volume Up, Scan Next forward. Ours are the same, except that the volume pair turns the other
-way. Nothing in CrossPoint names a camera shutter, an 8BitDo, a Kindle remote or a foot pedal. Open there: #4280 (BLE
+Down, Down, Space, Enter, Volume Up, Scan Next forward. Ours are the same, the volume pair included (the owner's choice,
+2026-11-28: a remote turns the same way in both firmwares). Nothing in CrossPoint names a camera shutter, an 8BitDo, a Kindle remote or a foot pedal. Open there: #4280 (BLE
 off until the chapter is built), #4416 (remote turns in the reading statistics; ours take the button path, PR 2), #4389 (Lock
 Controls), #4304 (a passkey is never shown).
 
@@ -153,8 +153,14 @@ One concern per PR; each on X4 Pro, T5S3 and Picco (Murphy, X4 Classic, EEGO A4 
    #4416's bug). With it the SDK's connection-parameter fix above (`acceptPeerConnParams`, Free-Ink branch
    `fix/ble-accept-peer-conn-params`). A per-remote swap of the two directions (the Free2's right key sends Left
    Arrow) and learned bindings come with step 3.
-3. **Settings row and pairing screen**: one `SettingsList.h` row with a `SettingRequires` value; scan, pair, forget;
-   the bond store the SDK keeps.
+3. **Settings row and pairing screen** (in review): Settings > Controls > Bluetooth Remote
+   (`src/activities/settings/BleRemoteActivity`): on/off (`bleRemote`), a search that lists HID remotes first, pair,
+   forget, Swap Remote Keys (`bleSwapKeys`, global). The radio follows the setting (`BleRadioPolicy::decide`): up while
+   it is on and a remote is saved or the screen is open, paused while Wi-Fi is up, asleep after the idle time until a
+   book opens, a key is pressed in one, or the screen opens. A Toggle Bluetooth Remote button/gesture action
+   (`BTN_TOGGLE_BLE_REMOTE`, offered only where `HalCapabilities::hasBleRadio()`, `ButtonActionOptions.h`); switching on
+   with no remote saved opens the screen on its search. Learned bindings per remote (CrossPoint's map buttons) are not
+   in it.
 4. **Wi-Fi beside a remote** on the S3: a background KOReader sync and a File Transfer session with a remote linked.
 5. **Release envs** on, after a soak with a real remote (Free3, Free2, a BOOX Keypage, a volume-key shutter).
 

@@ -61,6 +61,7 @@ inline constexpr const char* const NAMES[] = {
     "lightPanel",            // BTN_LIGHT_PANEL
     "lightWarmer",           // BTN_LIGHT_WARMER
     "lightCooler",           // BTN_LIGHT_COOLER
+    "toggleBleRemote",       // BTN_TOGGLE_BLE_REMOTE
 };
 static_assert(std::size(NAMES) == S::BUTTON_ACTION_COUNT, "every BUTTON_ACTION needs a stored name, at its value");
 

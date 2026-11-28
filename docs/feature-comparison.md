@@ -15,6 +15,8 @@ sees and does on the device.
 > column was not checked again.
 > **Updated 2026-11-16** with [speed and memory measured on the X3, the X4, the X4 Pro and the BOOX
 > Picco](#measured-speed-and-memory) (Witch Reader 2.53).
+> **Updated 2026-11-28** for Bluetooth page-turn remotes on the S3 boards (Witch Reader development builds; the
+> release builds follow after a soak), checked against crosspoint-reader develop `dd86a5ec1`.
 
 ## At a glance
 
@@ -33,7 +35,8 @@ X3, the X4 and the X4 Pro and as fast on the BOOX Picco, and on all four shows t
 out before sooner; CrossPoint reopens chapters a little sooner on the X4 and the Picco, and after such an open its
 screen settles sooner on the X3, the X4 and the Picco ([measured](#measured-speed-and-memory)).
 
-**CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, library
+**CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes (in Witch Reader's release builds,
+and on the X3 and X4), library
 loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, word and
 character spacing, file rename and multi-delete on the device, 34 interface languages. It runs on five
 boards Witch Reader does not support: the Xteink X4 Classic, Seeed reTerminal Sticky, M5Stack PaperMono,
@@ -151,7 +154,10 @@ and TXT books, a configurable status bar, a Quick Resume sleep screen.
 | --- | :---: | :---: |
 | Button actions | ✅ short, double and long press on every button, from one list of actions | ⚠️ front-button remap, a few long-press and Power choices |
 | Touch on the reading page | ✅ every zone and gesture assignable; pinch, rotate, corner holds | ✅ tap or swipe page turns, tap links, hold to select text |
-| Bluetooth page-turn remotes | ❌ | ✅ on the X3/X4 only inside a book |
+| Bluetooth page-turn remotes | ⚠️ S3 boards, development builds for now | ✅ on the X3/X4 only inside a book |
+| Bluetooth: what a remote's keys do | ✅ they press Page Forward and Page Back, so button actions, holds and reading statistics apply; a key swap for a remote that turns the wrong way | ⚠️ their own path: up to 8 learned buttons per remote (pages, chapters, menu, clipping); its turns are not in the reading statistics (#4348) |
+| Bluetooth: switching it on | ✅ Settings, or any button or gesture bound to Toggle Bluetooth Remote (which opens the pairing search when no remote is paired) | ✅ Settings, the reader menu, the quick-settings panel |
+| Bluetooth: reconnecting | ✅ whichever paired remote wakes first | ⚠️ only the one chosen remote |
 | Night mode (white on black) | ✅ Dark Mode, in the reader and every menu; on a schedule, from the light panel or the Picco's slide switch on the boards with a reading light | ✅ |
 | Clock on boards without a clock chip (X4) | ✅ software clock | ❌ boards with a clock chip only |
 | Time zone | ✅ list of 86, or detected from the IP address | ⚠️ list with automatic daylight saving, no detection |
@@ -236,7 +242,7 @@ Transfer over the serial cable.
 | USB Transfer over the serial cable | ✅ | ❌ USB Drive instead | ❌ | ❌ |
 | Clock | ⚠️ X3 chip; X4 software clock, uses more battery | ✅ chip on all three | ⚠️ X3 only | ✅ boards with a clock chip |
 | KOReader sync in the background | ⚠️ on closing a book only | ✅ also on wake, sleep, while reading | ❌ manual | ❌ manual |
-| Bluetooth page-turn remotes | ❌ | ❌ | ⚠️ in a book only, paused while a chapter indexes | ✅ |
+| Bluetooth page-turn remotes | ❌ not yet (an X3 test build runs the radio in the second framebuffer's memory) | ⚠️ development builds for now; paused while Wi-Fi is on | ⚠️ in a book only, paused while a chapter indexes | ✅ |
 | Highlights and clippings | ❌ | ❌ | ⚠️ 256 per book | ✅ 1,024 per book |
 | Cover Grid home theme | ✅ cover themes on both | ✅ | ❌ needs PSRAM | ✅ |
 | Font area in flash | ⚠️ 3.0 MB (384 KB hold hyphenation) | ✅ 3.4 MB | — | — |

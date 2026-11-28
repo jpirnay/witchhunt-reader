@@ -57,6 +57,8 @@ enum class SettingRequires : uint8_t {
   SunlightFadingPanel,
   // A two-position slide switch (BoardConfig input.toggleSwitch), BOOX Picco.
   SlideSwitch,
+  // A Bluetooth LE radio this build drives (HalCapabilities::hasBleRadio): a build property, so shown and kept alike.
+  BleRadio,
 };
 
 enum class SettingAction {
@@ -92,6 +94,7 @@ enum class SettingAction {
   FrontlightBrightnessPicker,
   FrontlightWarmthPicker,
   SwitchToUsbDrive,
+  BleRemote,
   Submenu,
 };
 
@@ -169,6 +172,31 @@ struct SettingInfo {
     enumCountFn = countFn;
     enumLabelFn = labelFn;
     return *this;
+  }
+
+  // Where an option's value differs from its position. By default option i stores i; a row with these stores
+  // enumValueOfOptionFn(i) instead, and its field's value v shows as option enumOptionOfValueFn(v) (-1: none of
+  // them, which reads as option 0). A button action row uses them to leave out what the board cannot do without moving
+  // any other option off its value (ButtonActionOptions.h). Function pointers, not a table, for the reason the literal
+  // labels above are one. Every reader of an ENUM row's field goes through enumValueOf() / enumOptionOf().
+  using OptionValueFn = uint8_t (*)(uint8_t option);
+  using ValueOptionFn = int (*)(uint8_t value);
+  OptionValueFn enumValueOfOptionFn = nullptr;
+  ValueOptionFn enumOptionOfValueFn = nullptr;
+
+  SettingInfo& withOptionValues(const OptionValueFn valueOfOption, const ValueOptionFn optionOfValue) {
+    enumValueOfOptionFn = valueOfOption;
+    enumOptionOfValueFn = optionOfValue;
+    return *this;
+  }
+  // The value option `option` stores.
+  [[nodiscard]] uint8_t enumValueOf(const uint8_t option) const {
+    return enumValueOfOptionFn ? enumValueOfOptionFn(option) : option;
+  }
+  // The option that stores `value`, -1 when none does.
+  [[nodiscard]] int enumOptionOf(const uint8_t value) const {
+    if (enumOptionOfValueFn) return enumOptionOfValueFn(value);
+    return value < getEnumOptionCount() ? value : -1;
   }
   SettingAction action = SettingAction::None;
 
@@ -533,9 +561,16 @@ struct SettingInfo {
   // Currently selected option index (0 if unreadable).
   [[nodiscard]] uint8_t getEnumSelectedIndex() const {
     if (type != SettingType::ENUM) return 0;
-    if (valuePtr) return SETTINGS.*(valuePtr);
-    if (valueGetter) return callValueGetter();
-    return 0;
+    uint8_t value;
+    if (valuePtr)
+      value = SETTINGS.*(valuePtr);
+    else if (valueGetter)
+      value = callValueGetter();
+    else
+      return 0;
+    if (!enumOptionOfValueFn) return value;  // unbounded, as it always read: the pickers bound it themselves
+    const int option = enumOptionOfValueFn(value);
+    return option < 0 ? 0 : static_cast<uint8_t>(option);
   }
 
   // Writes the selected option index through the same path getDisplayValue() reads.
@@ -543,9 +578,9 @@ struct SettingInfo {
     if (type != SettingType::ENUM) return;
     if (index >= getEnumOptionCount()) return;
     if (valuePtr)
-      SETTINGS.*(valuePtr) = index;
+      SETTINGS.*(valuePtr) = enumValueOf(index);
     else if (valueSetter)
-      callValueSetter(index);
+      callValueSetter(enumValueOf(index));
   }
 };
 
