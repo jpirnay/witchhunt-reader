@@ -13,7 +13,7 @@ make parallel PRs conflict: two PRs that each delete a neighbouring bullet edit 
 | File | Topic |
 |---|---|
 | [alternative-sync-providers.md](alternative-sync-providers.md) | OPDS progression sync (Kavita, Audiobookshelf) and BookOrbit: no firmware work (decided), what a plugin can carry and needs, BookOrbit's KOSync test |
-| [ble-keyboards.md](ble-keyboards.md) | Bluetooth LE keyboards and page turners: the C3's controller floor (heap at every boot or flash) and the design to decide, the controller's memory at boot, the S3 boards |
+| [ble-keyboards.md](ble-keyboards.md) | Bluetooth LE keyboards and page turners: measured on the C3 and the S3 boards; the S3 path (the SDK host on NimBLE) and its plan, the C3 to decide |
 | [boards-and-touch.md](boards-and-touch.md) | Light sleep with the frontlight (X4 Pro, T5S3), the T5S3 SD clock, trace scaffolding, the X4 Pro fast-DU shortcut, device validation (touch sessions, the T5S3's cold opens, the X4's clock drift, the Picco's touch in light sleep), touch follow-ups, the BOOX Picco after its first build, the motion sensor, USB attach in light sleep on the X4, crash traces, the button cursor on touch boards |
 | [book-cache.md](book-cache.md) | Book replacement that still wipes reading state, TXT/MD caches, the cache a USB Transfer `rm` leaves, cache-clear inconsistencies |
 | [cjk-ui-faces-on-card.md](cjk-ui-faces-on-card.md) | The CJK UI faces into the CJK languages' card packs: why they stayed in the image, what moving them takes, card mode |

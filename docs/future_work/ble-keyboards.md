@@ -1,67 +1,97 @@
 # BLE keyboards and page turners
 
-Status: **measured on the C3 at build time for both of Espressif's controllers, not started.** A Bluetooth LE page turner serves reading; typing into the
-existing text fields is marginal, and a text editor is out of scope (`SCOPE.md`). The measurements, the reasoning and
-the instructions to repeat them are in the spike's handover:
-[`docs/ble-keyboards-handover-2026-11-27.md` on `chore/ble-c3-spike`](https://github.com/jpirnay/witchhunt-reader/blob/3b26614c1a46dfef4b95a6ff29d88b456af52c19/docs/ble-keyboards-handover-2026-11-27.md).
-That branch is a measurement spike and is never merged. Related: [font-flash.md](font-flash.md) ("The C3 sdkconfig
-trim"), which needs the same core rebuild as the supported way to the flash-only controller.
+Status: **measured on devices (2026-11-28); S3 path chosen, C3 to decide, implementation not started.** A Bluetooth LE
+page turner serves reading; typing into the existing text fields is marginal, and a text editor is out of scope
+(`SCOPE.md`).
 
-## The C3 design: decide
+The measurements behind this page are on three branches that are never merged:
 
-**Open.** Which Espressif controller library and which host the X4 and X3 would use, if any.
+- `chore/ble-c3-spike`: the C3 build-time measurement of both Espressif controllers on the prebuilt core
+  (`docs/ble-keyboards-handover-2026-11-27.md` there) and the `CMD:BLE` probe (`src/BleSpike.cpp`).
+- `spike/ble-c3-rebuild-gate`: the probe on the rebuilt C3 core with the flash-only controller
+  (`docs/ble-gate-on-rebuild-2026-11-28.md` there).
+- `spike/ble-s3-probe`: the probe on the S3 boards, on top of the TinyUSB device-only build.
 
-**Why it matters.** On the C3 the controller, not the host, sets the floor, and it costs either heap or flash:
+The C3 figures assume the core rebuild with the #4212 trim (`docs/design/c3-core-rebuild.md`, branch
+`perf/c3-sdk-trim`), the S3 figures the TinyUSB device-only build (`docs/tinyusb-build.md`, branch
+`perf/s3-tinyusb-device-only`): each gives back about what BLE costs while it is off.
 
-- The prebuilt core links the ROM-assisted controller (`libbtdm_app.a`): about 113 KB of flash, and 23 KB of its code
-  in IRAM. On the C3, IRAM comes out of the heap, so the X3 and X4 lose those 23 KB at every boot once the controller
-  is linked, BLE on or off. Neither the linker script nor the memory release can give it back (memory protection is
-  locked; `esp_bt_controller_mem_release()` frees only data).
-- Espressif's flash-only controller (`libbtdm_app_flash.a`) has 1.5 KB of IRAM, but it replaces the ROM's link layer:
-  243,867 B of it links (measured), against 104,672 B of the ROM-assisted one. It can be swapped in at link time
-  without a core rebuild (handover, "Option B"). Its interrupt is held off during flash writes, and the prebuilt core
-  leaves flash auto-suspend off.
-- Configuration cannot trim the controller to HID only, and a hand-built patch table would not either: most of the
-  library's dispatch table already resolves to ROM, and the advertising code comes in through the library's own code
-  paths.
+## The S3 boards: the SDK host on NimBLE, host in PSRAM
 
-**What was tried.** The SDK's `BleKeyboardHost` on NimBLE-Arduino 2.5.1, sized like upstream's tuned C3 build
-(`env:default`, 2026-11-27), linked with each controller; the boot heap is predicted from the map:
+**Decided by the measurements.** The SDK's `BleKeyboardHost` (`freeink-sdk/libs/network/BleKeyboardHost`) on
+NimBLE-Arduino 2.5.1, the prebuilt core's controller, NimBLE's host in PSRAM through CrossPoint's forced include
+(`s3_nimble_psram.h`, #3785). Internal RAM free / largest internal block from `CMD:STATE` at Home:
 
-| Build | `Flash:` vs master | Left in the app slot | `.iram0.text` | Boot heap vs master |
-|---|---|---|---|---|
-| ROM-assisted controller + NimBLE | +239,026 B | 158,869 B | +23,466 B | about −31.8 KB |
-| Flash-only controller + NimBLE | +379,610 B | 18,285 B | +1,514 B | about −10.4 KB |
+| | X4 Pro | T5S3 | Picco |
+|---|---|---|---|
+| master | 186,192 / 139,252 | 132,512 / 90,100 | 182,052 / 139,252 |
+| TinyUSB device-only | 211,672 / 163,828 | 157,728 / 114,676 | 207,532 / 163,828 |
+| + BLE linked, radio off | 180,920 / 139,252 | 126,968 / 81,908 | 176,780 / 131,060 |
+| + NimBLE host up (`HOST`) | 134,312 / 94,196 | 80,320 / 38,900 | 130,212 / 90,100 |
+| after `HOST_OFF` | 180,628 / 102,388 | 126,620 / 51,188 | 176,524 / 131,060 |
 
-The host's share is about 105 KB of flash (NimBLE's C host and its C++ wrapper), the only part a hand-written
-keypress-only host could shrink. Derived from these builds, with a custom host estimated at 15-20 KB: about +140 KB of
-flash and about 25 KB less heap with the ROM-assisted controller, about +280 KB and about 4 KB less heap with the
-flash-only one.
+- Linking costs about 30.8 KB of internal RAM at every boot (the controller's IRAM and static data); the TinyUSB build
+  pays all but 5.3-5.5 KB of it. The host up costs 46.6 KB more on all three (upstream measured 46,508 B on its X4
+  Pro), and gives all but 300 B back when it stops; the largest internal block does not always come back.
+- Flash: +219 KB (x4pro 5,963,849 → 6,183,093 B; 370 KB left in the slot).
+- The controller alone (raw HCI, `CTRL`) costs 35.8 KB on the X4 Pro; it runs, scans and stops cleanly on all three.
+- USB Drive works with BLE linked (X4 Pro). Not run yet: a linked remote, TLS or Wi-Fi beside a linked remote.
 
-**Next step.**
-1. On the X4: the heap readings and run checks the handover lists (`CMD:BLE` on the spike, for both controllers). With
-   the flash-only controller, also a page turner kept connected through flash writes, and Wi-Fi alongside it.
-2. Decide the trade: heap at every boot against flash and font-cache MMU pages (the C3 sdkconfig trim would buy flash
-   back).
+## The C3 boards (X4, X3): decide
 
-## Any BLE build: gate the controller's memory at boot
+**Open, the owner's decision.** Measured on an X3, flash-only controller (`CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y` in the
+rebuild, CrossPoint's `patch_arduino_ble_controller.py`), free / largest block:
 
-**Open.** Arduino 3.3.11's `initArduino()` releases the BLE controller's memory at boot unless `bleInUse()` is true
-(`cores/esp32/esp32-hal-misc.c`; the core's comment says about 36 KB, not yet measured). NimBLE-Arduino includes
-`esp32-hal-alloc-ble-mem.h`, whose constructor makes `bleInUse()` true, so linking it keeps that memory from boot for
-every user. `bleInUse()` is weak: a strong definition that reads the BLE setting from NVS (initialised just before
-the call) makes BLE off cost nothing there; switching BLE on then needs a reboot. The spike's `src/BleSpike.cpp`
-has this. The flash-only controller needs it too: it still uses the ROM-reserved DRAM (`r_ip_funcs_p`, bound by
-`esp32c3.rom.ld`).
+| | Home | in a book (`alice-illustrated.epub`) |
+|---|---|---|
+| trim build, no BLE | 79,584 / 61,428 | 72,688 / 61,428 |
+| BLE linked, radio off | 69,432 / 51,188 | 62,300 / 57,332 |
+| controller alone up | 39,416 / 36,852 (30.4 KB) | 32,768 / 29,684 (29.9 KB) |
+| controller alone up, cut down (2 activities, small scan caches, no advertising or test mode) | 42,536 / 38,900 (27.1 KB) | 35,692 / 32,756 (26.9 KB) |
+| NimBLE host up | 18,424 / 15,860 (51.3 KB) | 11,396 / 8,692 |
 
-**Next step.** Part of whichever design lands, on every board.
+- The flash-only controller runs on the X3 through the rebuild: `run_in_flash=1`, every HCI command answered,
+  advertising reports seen, up in 37 ms. Flash +380 KB on the trim build (+235 KB against master), 157 KB left.
+- **NimBLE does not fit** beside the two-framebuffer reader: 11 KB free and an 8.7 KB largest block in a book.
+- **The controller alone does not fit either, on the soak.** Controller up at Home, then
+  `Through the Brazilian Wilderness.epub` opened uncached and 100 page turns, a dictionary lookup and three chapter
+  jumps: no panic, the secondary buffer stayed, but 8 chapter builds stopped at under 9 KB free ("Low heap … aborting
+  parse before paragraph layout") and kept partial sections of 3 pages, the lowest free since boot was 7,252 B and the
+  largest block at the end 21,492 B. The bar was a lowest free of 12 KB and a largest block of 28 KB. The cut-down
+  controller saves 3 KB; the analysis put the room needed at about 8 KB (a controller under 22 KB).
+- One start and stop in a book can halve the largest block for the rest of the boot (30,708 B after one cycle).
+- With the radio left on, a hand-written keypress-only host (scan, connect, Just Works pairing on the controller's AES,
+  minimal GATT for HID notifications) would add little, but its floor is the controller's.
 
-## The S3 boards
+The options:
 
-**Open, not started.** The X4 Pro, T5S3, Murphy M3 and Picco have 8 MB of PSRAM, so the heap is not the binding
-limit there: the SDK's `BleKeyboardHost` on NimBLE is the short path (`FREEINK_CAP_BLE_HID_HOST`, `BoardConfig.h`).
-Their flash headroom was not checked.
-Upstream CrossPoint puts NimBLE's host in PSRAM with a forced include (`s3_nimble_psram.h`, the #3785 series). Not
-measured here.
+1. **No BLE on the C3.** The S3 boards carry it.
+2. **The reader goes single-buffer while the radio is up** (+52,272 B on the X3, +48,000 B on the X4): no
+   anti-aliasing and no build arena while a remote is in use, and a chapter build then needs the radio stopped.
+3. **A hand-written host, with the radio up only between chapter builds**: stopped for every build, restarted after the
+   page shows, at most once per boot into room kept for it. Every start costs the 37 ms plus the reconnect of the remote,
+   and fragmentation after a stop is what upstream's X3 work fought for months (#2527, #3785, #4074, #4280).
 
-**Next step.** Independent of the C3 decision: build it for one S3 board, measure, and try a real page turner.
+## The controller's memory at boot: dropped
+
+`bleInUse()` from a setting (memory released at boot when BLE is off, a reboot to switch it on) gives back 1,176 to
+1,264 B on the X3 and leaves the largest block unchanged (`KEEP=0` against `KEEP=1`). Not worth a reboot.
+
+## Plan (S3 first)
+
+One concern per PR; each on X4 Pro, T5S3 and Picco (Murphy, X4 Classic, EEGO A4 build only).
+
+1. **Radio owner** (`lib/` or `src/`): starts and stops `BleHid`, polls it from the loop task, stops it for USB Drive,
+   sleep and an idle time without a link, declines light sleep while up (`HalPowerManager`); a `HalCapabilities`
+   predicate; no FreeRTOS task of an activity's. Host tests for its rules (CrossPoint's `RadioPolicy.h` is a model,
+   with our numbers).
+2. **Input**: remote keys enter through `HalGPIO::injectPress()` with the physical index the user's mapping gives Page
+   Forward / Page Back, so remapping, press types, the reading statistics and the sleep timer all apply (CrossPoint's
+   separate path is #4416's bug). Default key table for the common page turners; tap and hold.
+3. **Settings row and pairing screen**: one `SettingsList.h` row with a `SettingRequires` value; scan, pair, forget;
+   the bond store the SDK keeps.
+4. **Wi-Fi beside a remote** on the S3: a background KOReader sync and a File Transfer session with a remote linked.
+5. **Release envs** on, after a soak with a real remote (Free3, Free2, a BOOX Keypage, a volume-key shutter).
+
+Credit for what is ported: Tuan Q. Nguyen (@martinqnguyen) and Justin Mitchell (@itsthisjustin), CrossPoint #3785 and
+#4074.
