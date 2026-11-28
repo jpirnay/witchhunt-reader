@@ -699,6 +699,11 @@ class CrossPointSettings {
   // among them (HalGPIO feeds it in as button edges, below the touch gate), and so does a key bound to
   // BTN_TOGGLE_TOUCH_LOCK. A finger on the glass does not keep the device awake while it is on. See TouchGate.h.
   uint8_t touchLock = 0;
+  // Bluetooth Remote (boards with a BLE radio, HalCapabilities::hasBleRadio): the radio comes up for a saved remote
+  // while this is on (src/BleRadio). Off by default: the radio keeps the CPU at full speed while it is up.
+  uint8_t bleRemote = 0;
+  // Swap Remote Keys: a remote's forward key turns back and its back key forward (src/BleRadio.cpp routeInput).
+  uint8_t bleSwapKeys = 0;
   // Activate Immediately on a board with a digitiser (applyDeviceTouchDefaults()); the row is shown only there.
   uint8_t touchListActivation = TOUCH_LIST_SELECT_THEN_ACTIVATE;
 
@@ -1010,6 +1015,9 @@ class CrossPointSettings {
     // the mix without changing how bright the page looks.
     BTN_LIGHT_WARMER,
     BTN_LIGHT_COOLER,
+    // Bluetooth Remote on or off (bleRemote), on a board with a BLE radio. Global. Switching on with no remote saved
+    // opens the Bluetooth Remote screen on its search (ActivityManager::openBleRemote).
+    BTN_TOGGLE_BLE_REMOTE,
     BUTTON_ACTION_COUNT
   };
 

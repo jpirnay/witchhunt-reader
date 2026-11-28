@@ -594,6 +594,17 @@ inline void buildSettings(const RowSink& emit) {
              .requiring(binding.needsMultiTouch ? SettingRequires::MultiTouchPanel : SettingRequires::TouchPanel));
   }
 #endif  // CP_TOUCH_UI
+  // Bluetooth Remote (boards with a BLE radio). The device's Settings shows neither row: the Bluetooth Remote screen
+  // has both (BleRemoteActivity); here they serve the web page, the serial GET/SET and settings.json.
+  // Not built at all without a BLE host: such a build neither shows nor keeps them (boardKeeps()).
+  if constexpr (HalCapabilities::hasBleRadio()) {
+    emit(
+        SettingInfo::Toggle(StrId::STR_BLE_REMOTE, &CrossPointSettings::bleRemote, "bleRemote", StrId::STR_CAT_CONTROLS)
+            .requiring(SettingRequires::BleRadio));
+    emit(SettingInfo::Toggle(StrId::STR_BLE_SWAP_KEYS, &CrossPointSettings::bleSwapKeys, "bleSwapKeys",
+                             StrId::STR_CAT_CONTROLS)
+             .requiring(SettingRequires::BleRadio));
+  }
   // Tilt page turn (boards with an IMU)
   emit(SettingInfo::Toggle(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn, "tiltPageTurn",
                            StrId::STR_CAT_CONTROLS)
@@ -820,6 +831,8 @@ inline bool boardHas(const SettingRequires capability) {
       return HalCapabilities::panelFadesInSunlight();
     case SettingRequires::SlideSwitch:
       return gpio.hasToggleSwitch();
+    case SettingRequires::BleRadio:
+      return HalCapabilities::hasBleRadio();
   }
   return true;
 }
@@ -855,6 +868,7 @@ inline bool boardKeeps(const SettingRequires capability) {
     case SettingRequires::ReadingLightAndClock:
     case SettingRequires::SunlightFadingPanel:
     case SettingRequires::SlideSwitch:
+    case SettingRequires::BleRadio:
       return boardHas(capability);
   }
   return true;

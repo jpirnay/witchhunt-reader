@@ -23,19 +23,21 @@ namespace {
 using S = CrossPointSettings;
 namespace BAO = ButtonActionOptions;
 
-constexpr BAO::Caps kUnlit{false, false};
-constexpr BAO::Caps kLit{true, false};
-constexpr BAO::Caps kWarm{true, true};
+constexpr BAO::Caps kUnlit{false, false, false};
+constexpr BAO::Caps kLit{true, false, false};
+constexpr BAO::Caps kWarm{true, true, false};
+constexpr BAO::Caps kAll{true, true, true};
+constexpr BAO::Caps kUnlitBle{false, false, true};
 
 TEST(ButtonActionOptions, OptionZeroIsTheRowsDefault) {
-  for (const BAO::Caps caps : {kUnlit, kLit, kWarm}) {
+  for (const BAO::Caps caps : {kUnlit, kLit, kWarm, kAll, kUnlitBle}) {
     EXPECT_EQ(S::BTN_DEFAULT, BAO::actionAt(0, caps));
     EXPECT_EQ(0, BAO::optionOf(S::BTN_DEFAULT, caps));
   }
 }
 
 TEST(ButtonActionOptions, EveryOptionStoresItsActionAndReadsBackAsItself) {
-  for (const BAO::Caps caps : {kUnlit, kLit, kWarm}) {
+  for (const BAO::Caps caps : {kUnlit, kLit, kWarm, kAll, kUnlitBle}) {
     std::set<uint8_t> seen;
     const uint8_t count = BAO::optionCount(caps);
     for (uint8_t option = 0; option < count; ++option) {
@@ -48,9 +50,17 @@ TEST(ButtonActionOptions, EveryOptionStoresItsActionAndReadsBackAsItself) {
 }
 
 TEST(ButtonActionOptions, ABoardOffersOnlyWhatItCanDo) {
-  EXPECT_EQ(S::BUTTON_ACTION_COUNT, BAO::optionCount(kWarm));
-  EXPECT_EQ(S::BUTTON_ACTION_COUNT - 2, BAO::optionCount(kLit));
-  EXPECT_EQ(S::BUTTON_ACTION_COUNT - 6, BAO::optionCount(kUnlit));
+  EXPECT_EQ(S::BUTTON_ACTION_COUNT, BAO::optionCount(kAll));
+  EXPECT_EQ(S::BUTTON_ACTION_COUNT - 1, BAO::optionCount(kWarm));
+  EXPECT_EQ(S::BUTTON_ACTION_COUNT - 3, BAO::optionCount(kLit));
+  EXPECT_EQ(S::BUTTON_ACTION_COUNT - 7, BAO::optionCount(kUnlit));
+  EXPECT_EQ(S::BUTTON_ACTION_COUNT - 6, BAO::optionCount(kUnlitBle));
+  // The case the positional lists could not take: an action at the end of the enum on a board without the light
+  // block before it.
+  EXPECT_EQ(-1, BAO::optionOf(S::BTN_TOGGLE_BLE_REMOTE, kWarm));
+  EXPECT_GT(BAO::optionOf(S::BTN_TOGGLE_BLE_REMOTE, kUnlitBle), 0);
+  EXPECT_EQ(S::BTN_TOGGLE_BLE_REMOTE,
+            BAO::actionAt(static_cast<uint8_t>(BAO::optionOf(S::BTN_TOGGLE_BLE_REMOTE, kUnlitBle)), kUnlitBle));
   for (const uint8_t light : {S::BTN_LIGHT_TOGGLE, S::BTN_LIGHT_BRIGHTER, S::BTN_LIGHT_DIMMER, S::BTN_LIGHT_PANEL}) {
     EXPECT_EQ(-1, BAO::optionOf(light, kUnlit)) << int(light);
     EXPECT_GT(BAO::optionOf(light, kLit), 0) << int(light);
@@ -108,7 +118,7 @@ TEST(SettingInfoOptionValues, AValueTheBoardDoesNotOfferReadsAsTheDefault) {
 }
 
 TEST(SettingInfoOptionValues, OptionsAndLabelsLineUpOnEveryBoard) {
-  for (const BAO::Caps caps : {kUnlit, kLit, kWarm}) {
+  for (const BAO::Caps caps : {kUnlit, kLit, kWarm, kAll, kUnlitBle}) {
     std::vector<StrId> labels{StrId::STR_BTN_DEF_PREV_PAGE};
     for (const BAO::Option& option : BAO::ALL) {
       if (BAO::offered(option.needs, caps)) labels.push_back(option.label);

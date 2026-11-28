@@ -1,8 +1,10 @@
 #include "SettingActionDispatch.h"
 
+#include <HalCapabilities.h>
 #include <Logging.h>
 #include <WiFi.h>
 
+#include "BleRemoteActivity.h"
 #include "BootDiagnosticsActivity.h"
 #include "ButtonActionsOverviewActivity.h"
 #include "ButtonRemapActivity.h"
@@ -69,6 +71,10 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
     case SettingAction::AllFiles:
       return std::make_unique<FileBrowserActivity>(renderer, mappedInput, "/", std::string{},
                                                    FileBrowserActivity::Mode::AllFiles);
+    case SettingAction::BleRemote:
+      // Where no BLE host is linked the row does not exist, and the screen's code is dropped.
+      if constexpr (HalCapabilities::hasBleRadio()) return std::make_unique<BleRemoteActivity>(renderer, mappedInput);
+      return nullptr;
     case SettingAction::SwitchToUsbDrive:
       return std::make_unique<SwitchToUsbDriveActivity>(renderer, mappedInput);
     case SettingAction::Language:

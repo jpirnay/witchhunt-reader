@@ -193,6 +193,9 @@ class ActivityManager {
   void goToSettings(int tab = 0);  // tab: SettingsActivity's category slot (0 = Display)
   void goToClockSettings();
   void goToKOReaderSettings();
+  // The Bluetooth Remote screen over the screen in front, which Back returns to: for the toggle action, which opens it
+  // on its search (`search`) when switching on finds no remote saved. A no-op where no BLE host is linked.
+  void openBleRemote(bool search);
   // The Library on `tab`: Books in `path` (the root when empty); `focusName` selected; on Authors,
   // `author` (a hash) open.
   void goToLibrary(LibraryTab tab, std::string path = {}, std::string focusName = {},

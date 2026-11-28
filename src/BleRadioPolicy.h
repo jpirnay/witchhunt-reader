@@ -74,4 +74,34 @@ constexpr Keep whileRunning(const bool linked, const bool connecting, const uint
   return Keep::Keep;
 }
 
+// A start refused for memory is tried again after this long, or as soon as a book opens.
+inline constexpr uint32_t kRetryAfterRefusalMs = 30u * 1000u;
+
+// What the loop task knows on a pass, for whether the radio is on.
+struct Wish {
+  bool wanted;       // switched on with a remote saved, the Bluetooth Remote screen open, or a serial start
+  bool wifiOn;       // Wi-Fi is up: the radio waits for it to go (plan step 4 puts the two side by side)
+  bool storageBusy;  // USB Drive has the card
+  bool idleLatched;  // stopped for idleness, and nothing has woken it since
+  bool retryDue;     // no refusal since the last start, or kRetryAfterRefusalMs since it
+};
+
+enum class Decision : uint8_t {
+  Keep,  // as it is; a running radio goes on to whileRunning()
+  Start,
+  StopUnwanted,  // switched off
+  StopWifi,      // Wi-Fi came up
+};
+
+// For a radio that is on (`on`) or off, not stopping.
+constexpr Decision decide(const bool on, const Wish& w) {
+  if (on) {
+    if (!w.wanted) return Decision::StopUnwanted;
+    if (w.wifiOn) return Decision::StopWifi;
+    return Decision::Keep;
+  }
+  if (w.wanted && !w.wifiOn && !w.storageBusy && !w.idleLatched && w.retryDue) return Decision::Start;
+  return Decision::Keep;
+}
+
 }  // namespace BleRadioPolicy

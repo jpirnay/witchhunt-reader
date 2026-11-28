@@ -10,6 +10,8 @@
 // I2C) is found by Frontlight.begin(), after settings.json is read.
 namespace ButtonActionOptions {
 
-inline Caps boardCaps() { return Caps{HalCapabilities::hasFrontlight(), HalCapabilities::hasColorTemperature()}; }
+inline Caps boardCaps() {
+  return Caps{HalCapabilities::hasFrontlight(), HalCapabilities::hasColorTemperature(), HalCapabilities::hasBleRadio()};
+}
 
 }  // namespace ButtonActionOptions

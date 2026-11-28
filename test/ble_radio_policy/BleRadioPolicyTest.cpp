@@ -84,4 +84,55 @@ TEST(BleRadioPolicy, UsbDriveStopsARunningRadioEvenWithARemoteLinked) {
   EXPECT_EQ(whileRunning(/*linked=*/true, false, 0, /*storageBusy=*/true), Keep::StopStorage);
 }
 
+// --- On or off (decide) ---
+
+using BleRadioPolicy::decide;
+using BleRadioPolicy::Decision;
+using BleRadioPolicy::Wish;
+
+constexpr Wish kWanted{/*wanted=*/true, /*wifiOn=*/false, /*storageBusy=*/false, /*idleLatched=*/false,
+                       /*retryDue=*/true};
+
+TEST(BleRadioPolicy, AWantedRadioStarts) { EXPECT_EQ(decide(false, kWanted), Decision::Start); }
+
+TEST(BleRadioPolicy, NothingStartsARadioNobodyWants) {
+  Wish w = kWanted;
+  w.wanted = false;
+  EXPECT_EQ(decide(false, w), Decision::Keep);
+}
+
+TEST(BleRadioPolicy, SwitchingOffStopsARunningRadio) {
+  Wish w = kWanted;
+  w.wanted = false;
+  EXPECT_EQ(decide(true, w), Decision::StopUnwanted);
+}
+
+TEST(BleRadioPolicy, WifiStopsTheRadioAndKeepsItOff) {
+  Wish w = kWanted;
+  w.wifiOn = true;
+  EXPECT_EQ(decide(true, w), Decision::StopWifi);
+  EXPECT_EQ(decide(false, w), Decision::Keep);
+  w.wifiOn = false;
+  EXPECT_EQ(decide(false, w), Decision::Start);
+}
+
+TEST(BleRadioPolicy, AnIdleStopHoldsUntilSomethingWakesIt) {
+  Wish w = kWanted;
+  w.idleLatched = true;
+  EXPECT_EQ(decide(false, w), Decision::Keep);
+  EXPECT_EQ(decide(true, w), Decision::Keep);  // a running radio's idle time is whileRunning()'s
+}
+
+TEST(BleRadioPolicy, ARefusedStartWaitsForItsRetry) {
+  Wish w = kWanted;
+  w.retryDue = false;
+  EXPECT_EQ(decide(false, w), Decision::Keep);
+}
+
+TEST(BleRadioPolicy, UsbDriveKeepsAWantedRadioOff) {
+  Wish w = kWanted;
+  w.storageBusy = true;
+  EXPECT_EQ(decide(false, w), Decision::Keep);
+}
+
 }  // namespace

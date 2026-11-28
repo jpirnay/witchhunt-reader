@@ -43,6 +43,7 @@
 #include "reader/KOReaderSyncActivity.h"
 #include "reader/KOReaderSyncWorker.h"  // and KOReaderAutoSync.h
 #include "reader/ReaderActivity.h"
+#include "settings/BleRemoteActivity.h"
 #include "settings/ClockSettingsActivity.h"
 #include "settings/KOReaderSettingsActivity.h"
 #include "settings/OpdsServerListActivity.h"
@@ -589,6 +590,24 @@ void ActivityManager::goToSettings(const int tab) {
 
 void ActivityManager::goToClockSettings() {
   replaceActivity(std::make_unique<ClockSettingsActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::openBleRemote(const bool search) {
+  // Compiled out where no BLE host is linked, so the screen's code is dropped there with it.
+  if constexpr (!HalCapabilities::hasBleRadio()) return;
+  if (currentActivity == nullptr) return;
+  // Not over itself, nor over a screen that owns the whole surface for text entry.
+  const std::string& name = currentActivity->getName();
+  if (name == "BleRemote" || name == "KeyboardEntry") return;
+  auto screen = makeUniqueNoThrow<BleRemoteActivity>(
+      renderer, mappedInput, search ? BleRemoteActivity::View::Search : BleRemoteActivity::View::Menu);
+  if (!screen) {
+    LOG_ERR("ACT", "OOM: BleRemoteActivity");
+    return;
+  }
+  // Through the screen in front's own startActivityForResult(), as the light drawer is: the reader hands a lent
+  // framebuffer back there. Nothing comes back from the screen.
+  currentActivity->startActivityForResult(std::move(screen), [](const ActivityResult&) {});
 }
 
 void ActivityManager::goToKOReaderSettings() {

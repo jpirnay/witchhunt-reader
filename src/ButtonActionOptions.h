@@ -23,6 +23,7 @@ enum class Needs : uint8_t {
   Nothing,
   Light,      // a reading light (HalCapabilities::hasFrontlight)
   WarmLight,  // a second, warm light channel (HalCapabilities::hasColorTemperature)
+  BleRadio,   // a Bluetooth LE radio this build drives (HalCapabilities::hasBleRadio)
 };
 
 struct Option {
@@ -66,6 +67,7 @@ inline constexpr Option ALL[] = {
     {S::BTN_AUTO_PAGE_TURN, StrId::STR_BTN_ACT_AUTO_PAGE_TURN, Needs::Nothing},
     {S::BTN_SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON, Needs::Nothing},
     {S::BTN_TOGGLE_TOUCH_LOCK, StrId::STR_BTN_ACT_TOGGLE_TOUCH_LOCK, Needs::Nothing},
+    {S::BTN_TOGGLE_BLE_REMOTE, StrId::STR_BTN_ACT_TOGGLE_BLE_REMOTE, Needs::BleRadio},
     {S::BTN_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_TOGGLE, Needs::Light},
     {S::BTN_LIGHT_BRIGHTER, StrId::STR_BTN_ACT_LIGHT_BRIGHTER, Needs::Light},
     {S::BTN_LIGHT_DIMMER, StrId::STR_BTN_ACT_LIGHT_DIMMER, Needs::Light},
@@ -91,6 +93,7 @@ static_assert(listsEveryActionOnce(), "ButtonActionOptions::ALL must list every 
 struct Caps {
   bool light = false;
   bool warmLight = false;
+  bool bleRadio = false;
 };
 
 constexpr bool offered(const Needs needs, const Caps caps) {
@@ -101,6 +104,8 @@ constexpr bool offered(const Needs needs, const Caps caps) {
       return caps.light;
     case Needs::WarmLight:
       return caps.warmLight;
+    case Needs::BleRadio:
+      return caps.bleRadio;
   }
   return false;
 }

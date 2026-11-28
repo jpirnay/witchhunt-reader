@@ -57,6 +57,8 @@ enum class SettingRequires : uint8_t {
   SunlightFadingPanel,
   // A two-position slide switch (BoardConfig input.toggleSwitch), BOOX Picco.
   SlideSwitch,
+  // A Bluetooth LE radio this build drives (HalCapabilities::hasBleRadio): a build property, so shown and kept alike.
+  BleRadio,
 };
 
 enum class SettingAction {
@@ -92,6 +94,7 @@ enum class SettingAction {
   FrontlightBrightnessPicker,
   FrontlightWarmthPicker,
   SwitchToUsbDrive,
+  BleRemote,
   Submenu,
 };
 

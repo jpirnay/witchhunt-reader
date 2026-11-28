@@ -183,7 +183,7 @@ bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {
 }
 
 void CrossPointSettings::dropUnsupportedActions(CrossPointSettings& settings, const ButtonActionOptions::Caps& caps) {
-  if (caps.light && caps.warmLight) return;
+  if (caps.light && caps.warmLight && caps.bleRadio) return;
 
   // Every field that stores a BUTTON_ACTION. Listed once, here, so a sweep over
   // them cannot quietly miss one the way scattered per-field checks would.

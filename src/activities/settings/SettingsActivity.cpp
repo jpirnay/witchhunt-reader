@@ -119,6 +119,8 @@ void SettingsActivity::buildRows() {
          setting.nameId == StrId::STR_TIMEZONE)) {
       return;
     }
+    // On the Bluetooth Remote screen, which the row added below opens.
+    if (setting.nameId == StrId::STR_BLE_REMOTE || setting.nameId == StrId::STR_BLE_SWAP_KEYS) return;
     // Enrich font-family entries with SD card families discovered at boot.
     // The row is the walk's temporary; the screen keeps its own copy, and only that is enriched.
     SettingInfo enriched = setting;
@@ -161,6 +163,14 @@ void SettingsActivity::buildRows() {
   }
 
   // Device-only ACTION items — subcategory drives separator insertion automatically.
+  // The Bluetooth Remote screen, beside the buttons it adds to.
+  if constexpr (HalCapabilities::hasBleRadio()) {
+    controlsSettings.insert(
+        controlsSettings.begin(),
+        std::move(SettingInfo::Action(StrId::STR_BLE_REMOTE, SettingAction::BleRemote).withDisplayGetter([](void*) {
+          return std::string(SETTINGS.bleRemote ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+        })));
+  }
   controlsSettings.insert(controlsSettings.begin(),
                           SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   controlsSettings.insert(controlsSettings.begin(), SettingInfo::Separator(StrId::STR_MENU_BTN_PHYSICAL));
