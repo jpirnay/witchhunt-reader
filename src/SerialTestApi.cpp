@@ -70,6 +70,7 @@
 #if SERIAL_TEST_API
 extern GfxRenderer renderer;                    // main.cpp: CMD:LAB draws into its frame buffer
 std::string bleSpikeRun(std::string_view arg);  // BleSpike.cpp (spike only)
+void bleSpikeService();                         // BleSpike.cpp (spike only)
 #endif
 
 namespace SerialTestApi {
@@ -2420,6 +2421,7 @@ void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, 
 void begin(GfxRenderer& renderer) { testRenderer = &renderer; }
 
 void service() {
+  ::bleSpikeService();
   serviceHeldPresses();
   serviceEvents();
   serviceIdle();
