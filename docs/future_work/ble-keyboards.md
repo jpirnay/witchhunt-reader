@@ -56,6 +56,25 @@ Measured with the X4 Pro probe (`spike/ble-s3-probe`, `CMD:BLE:SCAN/CONNECT/RECO
   supervision timeout at 8 s or more (the SDK chose 8 s for long blocking renders, ea75c718). This is likely CrossPoint
   issue #4313 ("never reconnected inside a book").
 
+### Remotes CrossPoint knows
+
+From CrossPoint's issues, PRs and code (`upstream/develop`, 2026-11-28). What each gets here:
+
+| Remote | Keys | CrossPoint | Here |
+|---|---|---|---|
+| HanLinYue Free3 / Free3-R (`Free3`) | page buttons raw `02 00 00` / `01 00 00` (Consumer 0xE9/0xEA in its R mode); third button tap `00 02 00`, hold `08 00 00` | works; third button by the SDK profile (chapters), page buttons learned (#3785, #3197) | third button: a held Page Forward / Page Back; page buttons by their decoded key |
+| BOOX Keypage | report 3: 02/04 forward, 01/08 back | built-in table (#3785) | the SDK profile |
+| Free2, Kobo/PC firmware (`Free2-M`) | Left/Right Arrow (reversed) | the e-paper firmware (`Free 2`) never reconnected in a book; Kobo/PC firmware fixed it (#4313) | the arrows; a swap per remote is step 3 |
+| Kobo Remote / tolino flip | Down Arrow (big button), Up Arrow | the default keys (disc. #4088) | the arrows |
+| Flic Duo, HID keyboard mode | arrows in a bare key array | SDK fix 9ab48735 (Free-Ink #148) | in our SDK pin |
+| IINE Gamebrick, a video ring | not recorded | work (#2418, disc. #117) | not known |
+
+CrossPoint's default keys (`pageActionFor`): Left, Page Up, Up, Backspace, Volume Down, Scan Previous back; Right, Page
+Down, Down, Space, Enter, Volume Up, Scan Next forward. Ours are the same, except that the volume pair turns the other
+way. Nothing in CrossPoint names a camera shutter, an 8BitDo, a Kindle remote or a foot pedal. Open there: #4280 (BLE
+off until the chapter is built), #4416 (remote turns in the reading statistics; ours take the button path, PR 2), #4389 (Lock
+Controls), #4304 (a passkey is never shown).
+
 ## The C3 boards (X4, X3): decide
 
 **Open, the owner's decision.** Measured on an X3, flash-only controller (`CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y` in the
@@ -126,7 +145,8 @@ One concern per PR; each on X4 Pro, T5S3 and Picco (Murphy, X4 Classic, EEGO A4 
    predicate; no FreeRTOS task of an activity's. Host tests for its rules (CrossPoint's `RadioPolicy.h` is a model,
    with our numbers).
 2. **Input** (in review): `src/BleRemoteKeys.h` turns the SDK's raw button edges into Page Forward / Page Back presses
-   (arrows, Page Up/Down, Space, the consumer volume keys; the SDK's Free3 and BOOX Keypage profiles by raw code), a
+   (CrossPoint's keys: arrows, Page Up/Down, Space, Enter, Backspace, the consumer volume and track keys; the SDK's Free3
+   and BOOX Keypage profiles by raw code, the Free3's chapter key as a hold), a
    hold from the remote's own press and release times at the hardware buttons' 1 s; `BleRadio` injects each through
    `MappedInputManager::injectRawPress()` with the physical index the user's mapping gives the button, so remapping,
    press types, button actions, the reading statistics and the sleep timer all apply (CrossPoint's separate path is

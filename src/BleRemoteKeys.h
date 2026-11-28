@@ -19,50 +19,66 @@ enum class Target : uint8_t { None, PageForward, PageBack };
 inline constexpr uint32_t kHoldMs = 1000;
 
 // A key the SDK's decoder read (its HID usage, or the low byte of a consumer usage). Page turners in a keyboard mode
-// send arrows, Page Up/Down or Space; shutter remotes send the consumer volume keys.
+// send arrows, Page Up/Down, Space or Enter; others send consumer keys. The set is CrossPoint's (lib/BlePageTurner,
+// pageActionFor), except that the volume pair turns the other way there: Volume Up forward.
 constexpr Target targetForUsage(const uint8_t usage) {
   switch (usage) {
     case 0x4F:  // Right Arrow
-    case 0x51:  // Down Arrow
+    case 0x51:  // Down Arrow (the Kobo Remote's big button)
     case 0x4E:  // Page Down
     case 0x2C:  // Space
+    case 0x28:  // Enter
     case 0xEA:  // Volume Down (consumer)
+    case 0xB5:  // Scan Next Track (consumer)
       return Target::PageForward;
     case 0x50:  // Left Arrow
     case 0x52:  // Up Arrow
     case 0x4B:  // Page Up
+    case 0x2A:  // Backspace
     case 0xE9:  // Volume Up (consumer)
+    case 0xB6:  // Scan Previous Track (consumer)
       return Target::PageBack;
     default:
       return Target::None;
   }
 }
 
-constexpr Target targetForRemoteKey(const freeink::RemoteKey key) {
+// What a key the SDK knows by its raw code (BleRemoteProfiles.h) turns. Right and Left turn a page. PageDown and PageUp
+// are a remote's chapter keys (the Free3's third button: PageDown on a tap, PageUp on its hold, which sends a code of
+// its own), and arrive as a hold of Page Forward / Page Back: the next or previous chapter unless the user bound that
+// long press to something else.
+struct Mapped {
+  Target target = Target::None;
+  bool hold = false;
+};
+
+constexpr Mapped mappedForRemoteKey(const freeink::RemoteKey key) {
   switch (key) {
     case freeink::RemoteKey::Right:
-    case freeink::RemoteKey::PageDown:
-      return Target::PageForward;
+      return {Target::PageForward, false};
     case freeink::RemoteKey::Left:
+      return {Target::PageBack, false};
+    case freeink::RemoteKey::PageDown:
+      return {Target::PageForward, true};
     case freeink::RemoteKey::PageUp:
-      return Target::PageBack;
+      return {Target::PageBack, true};
     case freeink::RemoteKey::Count:
       break;
   }
-  return Target::None;
+  return {};
 }
 
 // A remote the SDK has a profile for (freeink::remoteButtonProfileIndex(), by its name): its raw codes decide. A
 // binding marked anyReport matches the value and byte index under any report id.
-inline Target targetForProfile(const int profile, const uint32_t code) {
-  if (profile < 0) return Target::None;
+inline Mapped mappedForProfile(const int profile, const uint32_t code) {
+  if (profile < 0) return {};
   const freeink::RemoteButtonProfile& remote = freeink::kRemoteButtonProfiles[profile];
   for (uint8_t i = 0; i < remote.count; ++i) {
     const freeink::RemoteButtonBinding& binding = remote.buttons[i];
     const uint32_t mask = binding.anyReport ? 0x00FFFFu : 0xFFFFFFu;
-    if ((code & mask) == (binding.code & mask)) return targetForRemoteKey(binding.key);
+    if ((code & mask) == (binding.code & mask)) return mappedForRemoteKey(binding.key);
   }
-  return Target::None;
+  return {};
 }
 
 // One raw edge, the fields of freeink::RawButtonEvent the router reads.
@@ -93,15 +109,15 @@ class Router {
   // True when `out` holds a press to inject.
   bool feed(const Edge& edge, Press& out) {
     if (edge.pressed) {
-      Target target = targetForProfile(profile_, edge.code);
-      if (target == Target::None) target = targetForUsage(edge.keycode);
-      held_ = Held{edge.code, target, edge.atMs, true};
+      Mapped mapped = mappedForProfile(profile_, edge.code);
+      if (mapped.target == Target::None) mapped = Mapped{targetForUsage(edge.keycode), false};
+      held_ = Held{edge.code, mapped.target, mapped.hold, edge.atMs, true};
       return false;
     }
     if (!held_.active || edge.code != held_.code) return false;
     held_.active = false;
     if (edge.wasRest || held_.target == Target::None) return false;
-    out = Press{held_.target, edge.atMs - held_.pressAtMs >= kHoldMs, edge.atMs};
+    out = Press{held_.target, held_.hold || edge.atMs - held_.pressAtMs >= kHoldMs, edge.atMs};
     return true;
   }
 
@@ -109,6 +125,7 @@ class Router {
   struct Held {
     uint32_t code = 0;
     Target target = Target::None;
+    bool hold = false;  // a chapter key: a hold however long it was down
     uint32_t pressAtMs = 0;
     bool active = false;
   };
