@@ -8,7 +8,15 @@
 #include <esp_heap_caps.h>
 
 #include "BleRadioPolicy.h"
+#include "BleRemoteKeys.h"
+#include "ButtonEventManager.h"
+#include "MappedInputManager.h"
 #endif
+
+extern MappedInputManager mappedInputManager;  // main.cpp
+
+static_assert(BleRemoteKeys::kHoldMs == ButtonEventManager::LONG_PRESS_MS,
+              "a remote's hold must be the hardware buttons' long press");
 
 namespace BleRadio {
 
@@ -71,6 +79,8 @@ bool exclusiveStorage = false;  // the last service() pass's answer
 uint32_t idleSinceMs = 0;       // the start, or the last pass a remote was linked
 StopReason pendingStop = StopReason::None;
 uint32_t stopStartedMs = 0;
+BleRemoteKeys::Router router;  // routeInput()
+bool routerLinked = false;     // the link state the router was last told about
 
 BleRadioPolicy::Heap internalHeap() {
   constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
@@ -101,6 +111,8 @@ void finishStop(const StopReason reason) {
   state.lastStop = reason;
   state.lastEndMs = millis() - stopStartedMs;
   pendingStop = StopReason::None;
+  router.setRemote(nullptr);
+  routerLinked = false;
   powerManager.setRadioActive(false);
   const BleRadioPolicy::Heap heap = internalHeap();
   LOG_INF("BLE", "radio off (%s) after %lu ms: internal %u/%u", name(reason),
@@ -119,15 +131,25 @@ void beginStop(const StopReason reason) {
   LOG_INF("BLE", "radio stop (%s) waits for the SDK", name(reason));
 }
 
-// Until the remote's keys are routed to the buttons, a key is logged and dropped: the SDK's rings never hold a press
-// older than the page it would turn.
-void drainInput() {
+// The remote's keys as the mapped Page Forward / Page Back buttons (BleRemoteKeys.h). The key ring is drained unread:
+// every press also arrives as a raw edge, which carries the timing a hold needs. A press is injected at its release.
+void routeInput(const bool linked) {
+  if (linked != routerLinked) router.setRemote(linked ? BleHid.connectedName() : nullptr);
+  routerLinked = linked;
   freeink::KeyEvent key;
   while (BleHid.popKey(key)) {
-    LOG_DBG("BLE", "key %02x (special %u) dropped", key.keycode, static_cast<unsigned>(key.special));
   }
   freeink::RawButtonEvent raw;
   while (BleHid.popRawButton(raw)) {
+    BleRemoteKeys::Press press{};
+    if (!router.feed(BleRemoteKeys::Edge{raw.code(), raw.pressed, raw.wasRest, raw.atMs, raw.keycode}, press)) {
+      continue;
+    }
+    const bool forward = press.target == BleRemoteKeys::Target::PageForward;
+    const MappedInputManager::Button button =
+        forward ? MappedInputManager::Button::PageForward : MappedInputManager::Button::PageBack;
+    mappedInputManager.injectRawPress(mappedInputManager.rawIndex(button), press.hold, press.atMs);
+    LOG_DBG("BLE", "remote %s%s", forward ? "page forward" : "page back", press.hold ? " (hold)" : "");
   }
 }
 
@@ -194,8 +216,8 @@ void service(const bool exclusive) {
   }
   if (!state.on) return;
   BleHid.poll();
-  drainInput();
   state.linked = BleHid.isConnected();
+  routeInput(state.linked);
   state.connecting = BleHid.isConnecting();
   const uint32_t now = millis();
   if (state.linked) idleSinceMs = now;
