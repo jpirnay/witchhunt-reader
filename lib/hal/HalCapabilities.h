@@ -451,6 +451,13 @@ bool defersUiLookChange();
 inline bool defersUiLookChange() { return !keepsSecondaryBuffer(); }
 #endif
 
+// --- Radio -------------------------------------------------------------------
+
+// This build links a Bluetooth LE host for remotes (the SDK's BleKeyboardHost on NimBLE, src/BleRadio.h). The S3
+// boards, whose PSRAM holds NimBLE's host ([ble_s3] in platformio.ini); the C3 boards link none: there the controller
+// alone does not fit beside the reader (docs/future_work/ble-keyboards.md). A build capability, so it is constexpr.
+constexpr bool hasBleRadio() { return FREEINK_CAP_BLE_HID_HOST != 0; }
+
 // A frontlight is present: PWM (LEDC or PM1-driven), or an LED driver on the I2C bus (the BOOX Picco's).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight(); }
 
