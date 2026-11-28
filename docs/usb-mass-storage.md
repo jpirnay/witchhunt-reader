@@ -138,11 +138,11 @@ comes back dead until the cable is replugged.
 A board opts in with `-DFREEINK_CAP_USB_MSC=1` in its own env. Three constraints
 come with it:
 
-- **The env must extend `base`, not `firmware_tuned`.** Anything that sets
-  `custom_sdkconfig` / `custom_component_remove` makes pioarduino rebuild the
-  Arduino core from source, and that rebuild omits the prebuilt TinyUSB component
-  graph `USBMSC` links against. Both S3 envs already extend `base` for this
-  reason.
+- **The env must extend `base`, not `firmware_tuned`.** `custom_sdkconfig` makes
+  pioarduino rebuild the Arduino core from source (`custom_component_remove`
+  applies only inside that rebuild), and the rebuild omits the prebuilt TinyUSB
+  component graph `USBMSC` links against. Every S3 env extends `base` for this
+  reason; the C3 envs rebuild (`docs/design/c3-core-rebuild.md`).
 - **`USE_BLOCK_DEVICE_INTERFACE` must be on**, which is what makes SdFat's
   `SdSpiCard` derive from `FsBlockDeviceInterface`. The SDK's
   `SDCardManager/inject_build_flags.py` turns it on automatically whenever
