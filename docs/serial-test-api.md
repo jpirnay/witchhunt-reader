@@ -724,6 +724,30 @@ correction applied, gyro X the portrait left/right tilt axis and Y the landscape
 IMU is woken for the read and put back to sleep, which holds the loop about 300 ms. Held still,
 the acceleration is gravity: read it in each pose to measure how a board's IMU is mounted.
 
+### Bluetooth LE radio: `BLE`
+
+```
+CMD:BLE
+CMD:BLE:ON
+CMD:BLE:OFF
+```
+
+Only in builds that link a Bluetooth LE host (`HalCapabilities::hasBleRadio()`: the S3 dev envs, `[ble_s3]` in
+`platformio.ini`); elsewhere the command does not exist. `ON` asks the radio's owner (`src/BleRadio.h`) to start it,
+`OFF` to stop it, and both report its state the way a bare `CMD:BLE` does:
+
+`BLE:result=<start result> on=0|1 stopping=0|1 linked=0|1 connecting=0|1 bonds=<n> starts=<n> refusals=<n>
+last_start=<result> last_stop=<reason> begin_ms=<ms> end_ms=<ms> before=<free>/<largest> after=<free>/<largest>
+internal=<free>/<largest> cpu=<MHz> hold=0|1 rej_radio=<n>`
+
+`result` is empty unless `ON` asked for a start: `Started`, `AlreadyOn`, `HeapLow`, `HeapInPieces`, `RolledBack`,
+`StorageBusy`, `BeginFailed`, `Stopping` (`src/BleRadioPolicy.h` has the rules); `last_start` is `None` until the
+first `ON` after a boot, `last_stop` names why the radio last went down (`Requested`, `IdleNoLink`, `Sleep`,
+`ExclusiveStorage`, `RolledBack`). `before`/`after` are internal RAM
+around the last `begin()`, `internal` now. `hold` says whether the power manager holds the clock for the radio
+(`HalPowerManager::setRadioActive`); with it set `cpu` stays at full speed and `rej_radio` counts the light-sleep
+slices the radio declined.
+
 ### Heap ballast: `HEAP`
 
 ```

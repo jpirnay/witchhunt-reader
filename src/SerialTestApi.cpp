@@ -16,6 +16,7 @@
 #include <cstring>
 #include <string>
 
+#include "BleRadio.h"
 #include "BootDiagnostics.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
@@ -2002,6 +2003,45 @@ void cmdImu(std::string_view /*arg*/) {
   replyf("IMU:ax=%s ay=%s az=%s gx=%s gy=%s gz=%s", text[0], text[1], text[2], text[3], text[4], text[5]);
 }
 
+#if FREEINK_CAP_BLE_HID_HOST
+// CMD:BLE[:ON|:OFF]: the Bluetooth LE radio's owner (src/BleRadio.h), started, stopped or only reported.
+void cmdBle(const std::string_view arg) {
+  const char* result = "";
+  if (arg == "ON") {
+    result = BleRadio::name(BleRadio::start());
+  } else if (arg == "OFF") {
+    BleRadio::stop(BleRadio::StopReason::Requested);
+  } else if (!arg.empty()) {
+    reply("BLE_ERROR:ON, OFF or nothing");
+    return;
+  }
+  const BleRadio::Status s = BleRadio::status();
+  constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  // Longer than replyf()'s line: three pieces, one reply.
+  char a[96];
+  char b[160];
+  char c[96];
+  snprintf(a, sizeof(a), "BLE:result=%s on=%d stopping=%d linked=%d connecting=%d bonds=%u starts=%lu refusals=%lu",
+           result, s.on ? 1 : 0, s.stopping ? 1 : 0, s.linked ? 1 : 0, s.connecting ? 1 : 0,
+           static_cast<unsigned>(s.bonds), static_cast<unsigned long>(s.starts),
+           static_cast<unsigned long>(s.refusals));
+  snprintf(b, sizeof(b), " last_start=%s last_stop=%s begin_ms=%lu end_ms=%lu before=%u/%u after=%u/%u",
+           BleRadio::name(s.lastStart), BleRadio::name(s.lastStop), static_cast<unsigned long>(s.lastBeginMs),
+           static_cast<unsigned long>(s.lastEndMs), static_cast<unsigned>(s.freeBefore),
+           static_cast<unsigned>(s.largestBefore), static_cast<unsigned>(s.freeAfter),
+           static_cast<unsigned>(s.largestAfter));
+  snprintf(c, sizeof(c), " internal=%u/%u cpu=%lu hold=%d rej_radio=%lu",
+           static_cast<unsigned>(heap_caps_get_free_size(caps)),
+           static_cast<unsigned>(heap_caps_get_largest_free_block(caps)),
+           static_cast<unsigned long>(getCpuFrequencyMhz()), powerManager.radioActive() ? 1 : 0,
+           static_cast<unsigned long>(powerManager.lightSleepStats().rejRadio));
+  std::string line = a;
+  line += b;
+  line += c;
+  reply(line);
+}
+#endif
+
 void cmdLab(std::string_view arg) {
   if (arg.substr(0, 4) == "LUT:") {
     const std::string_view hex = arg.substr(4);
@@ -2226,6 +2266,9 @@ constexpr Command kCommands[] = {
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
     {"REBOOT", &cmdReboot},   {"HEAP", &cmdHeap},     {"TTF", &cmdTtf},     {"FS", &cmdFs},
     {"PAGE", &cmdPage},       {"LAB", &cmdLab},       {"IMU", &cmdImu},
+#if FREEINK_CAP_BLE_HID_HOST
+    {"BLE", &cmdBle},
+#endif
 #endif
 };
 

@@ -44,6 +44,7 @@
 #include <cstring>
 #include <iterator>
 
+#include "BleRadio.h"
 #include "BootDiagnostics.h"
 #include "ButtonEventManager.h"
 #include "CjkUiFonts.h"
@@ -835,6 +836,9 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
   }
+  // Under powerLock, at the normal clock its deinit needs. A stop the SDK cannot finish within its wait is left to the
+  // deep sleep, which powers the controller down with the rest of the chip.
+  BleRadio::stop(BleRadio::StopReason::Sleep);
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
@@ -2051,6 +2055,8 @@ void loop() {
     // run the activity and nothing else. It leaves by rebooting, never by
     // transitioning, so there is no path out of here that we need to service.
     mappedInputManager.update();
+    // A Bluetooth LE radio still up stops now, and none starts while the host has the card.
+    BleRadio::service(/*exclusiveStorage=*/true);
     activityManager.loop();
     if (activityManager.preventAutoSleep()) {
       // A host is attached: keep the clock up so MSC callbacks stay responsive.
@@ -2067,6 +2073,8 @@ void loop() {
 
   // After the exclusive-storage return: it saves settings to the card.
   applySlideSwitch();
+  // The Bluetooth LE radio's pass (src/BleRadio.h): the SDK's poll, and its stop after an idle time with no remote.
+  BleRadio::service(/*exclusiveStorage=*/false);
 
   // The UI touch gate, refreshed every tick from the settings and the activity on
   // top (TouchGate.h). Touch Lock silences everything. Otherwise the reader keeps
