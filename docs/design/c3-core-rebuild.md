@@ -97,7 +97,18 @@ with a 1 MiB round trip (140 against 142 KB/s up, 231 against 248 down, one run 
 - **A change of options changes the core's `sections.ld`.** `scripts/iram_budget.py` compares its sha256 with the
   one `ld/esp32c3-iram-budget/sections.ld` was generated from and stops the build. Regenerate with
   `tools/iram-budget/gen_sections_ld.py` (its docstring), then build again. Its `--check` reproduces the rebuilt core's
-  file byte for byte.
+  file byte for byte. Both leave the file's `Generated from:` line out of the hash: in a rebuilt core it names the
+  `.pio` directory of the build that made it, so it differs per worktree and per CI runner.
+- **The rebuild run itself is not checked.** pioarduino's hybrid compile sets `ARDUINO_LIB_COMPILE_FLAG=Build`,
+  compiles the IDF libraries with the prebuilt core still installed, copies them in, and links the firmware in a child
+  `pio run`. `scripts/iram_budget.py` stands aside in that outer run (on a cold cache its check would stop the rebuild
+  before it starts, as on the first CI run of #950) and checks the child, which links against the rebuilt core. A cold
+  `pio check` takes the same outer run and analyses our sources with the project's flags (from pioarduino's
+  integration dump).
+- **Rebuilds are close, not identical.** Two rebuilds of the same options here differed in one FreeRTOS function
+  (`prvInitialiseNewStreamBuffer` with or without an `.isra.0` clone, one rule in `sections.ld`) and by 80 B of flash.
+  The cause was not found. The committed script is generated from a cold rebuild (prebuilt core, fresh worktree), the
+  way CI makes it; a CI check that fails names the sha it found.
 - **A worktree on an older branch** (no `custom_sdkconfig` for the C3) that builds a C3 env next makes pioarduino
   reinstall the whole framework, about 1 GB, and the next build of this branch rebuilds the core. That is pioarduino's
   own reinstall path. To work on both without that, give one of them its own core directory
