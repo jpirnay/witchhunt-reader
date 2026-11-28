@@ -4,6 +4,11 @@
 #include <HalDisplay.h>
 #include <TextScale.h>
 
+// SPIKE ONLY (spike/ble-c3-rebuild-gate, src/BleSpike.cpp): a pooled BLE session holding the secondary framebuffer
+// stops the radio and returns it before the reader builds, releases or reallocates.
+void bleSessionYieldForBuild(const char* why);
+bool bleSessionWanted();
+
 class FontCacheManager;
 class SdCardFont;
 struct GlyphRun;
@@ -525,8 +530,14 @@ class GfxRenderer {
   // operations that don't need it (e.g. chapter compilation). BW rendering
   // continues normally. Grayscale AA and (on X4) fast differential are
   // unavailable until reallocSecondaryBuffer() is called.
-  bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
-  bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
+  bool releaseSecondaryBuffer() const {
+    bleSessionYieldForBuild("release");  // SPIKE: a pooled BLE session gives the buffer back first
+    return display.releaseSecondaryBuffer();
+  }
+  bool reallocSecondaryBuffer() const {
+    bleSessionYieldForBuild("realloc");  // SPIKE
+    return display.reallocSecondaryBuffer();
+  }
   bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
   bool keepsPreviousFrame() const { return display.keepsPreviousFrame(); }
   bool secondaryHoldsFrameOnScreen() const { return display.secondaryHoldsFrameOnScreen(); }

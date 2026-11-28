@@ -123,3 +123,31 @@ every session. Against Fable's bar (pool < 44 KB, < 22 KB outside, pool empty af
 unchanged): passed. What it does not answer yet: a chapter build during a session (39.7 KB free, no secondary as
 scratch): the radio has to yield the block (stop, return, build, borrow, restart: 3.8 s of a deaf remote per build).
 The X4 (48,000 B block, its fast refresh needs the secondary) is not measured.
+
+## E3: the soak with the pooled session yielding to builds (2026-11-28)
+
+`CMD:BLE:POOL=S`: the session keeps the secondary as the radio's pool while reading. `bleSessionYieldForBuild()`
+(called from `compileSectionCache()`, before Background-C's borrow, and from `GfxRenderer::releaseSecondaryBuffer()` /
+`reallocSecondaryBuffer()`, on the render task or the loop task; lock order render lock, then the session mutex) stops
+the radio, checks the pool is empty and returns the buffer; once the buffer has been home for 3 s the loop task
+borrows it again and restarts the radio (clock held first). Background-B's look-ahead is refused while a session is
+on; the render-time `LentSecondary` arena simply gets nothing and falls back to the heap. Same soak book as M2, cache
+absent, the Free2 linked and pressed every 5-15 s:
+
+| | M2 (secondary just released) | E3 (pool, yield to builds) |
+|---|---|---|
+| aborted parses | 19 | 0 |
+| pictures dropped | 6 | 0 |
+| failed reallocs of the secondary | 345 | 0 |
+| lowest free since boot | 4,972 B | 27,432 B |
+| chapters | several with 0 pages | full (100, 68, 34, 9, 4 pages) |
+| secondary back at the end | no (reboot) | yes, pool empty |
+
+Five yields (three on a chapter jump's realloc, one on a compile, one Background-C), eight restarts, none failed.
+Reading in a session: ~37-41 KB free / 32-37 KB largest. The compile case (E3c: the session on before a jump to the
+last page of a built chapter, then a turn into an unbuilt one): `yield compile` 177 ms, the 9-page chapter built
+blocking, the radio back 4.3 s after the yield and the link 3.8 s after that: a deaf remote for about 8 s at that
+chapter's start (build, the 3 s settle, the reconnect). Presses arrived whenever the link was up. Look-ahead built
+before a session starts (Background-B on arrival) made most crossings plain loads.
+
+Open: shorten the settle (resume when the page is on the glass) and the reconnect (GATT caching); the X4.

@@ -12,6 +12,7 @@
 // CMD:BLE:KEYS[=ms]        wait, then return and clear the log: link up/down, link_ms, keys, raw edges, times.
 // CMD:BLE:LINK, FORGET=addr, DISCONNECT, PARAMS=0|1 (accept the remote's connection parameters).
 // CMD:BLE:CLOCK=0|1        hold the CPU clock at full speed while the host runs (default 1).
+// CMD:BLE:POOL=S           E3 session: the pool held while reading, yielded to builds, taken back after (POOL=0 ends).
 // CMD:BLE:POOL=1|0, POOLSTAT  the radio's memory in a pool in the lent secondary framebuffer (E2).
 // CMD:BLE:FB=0|S|1         release the secondary framebuffer once / keep it released (session) / take it back.
 // CMD:BLE:KEEP=0|1  whether the next boot keeps the controller's memory (initArduino() releases it when bleInUse()
@@ -453,7 +454,100 @@ void updateClockHold() {
   }
 }
 
+// ---- E3: the pooled session yields its block to builds -------------------------------------------------------------
+// POOL=S: the session holds the secondary as the radio's pool; bleSessionYieldForBuild() (called by the reader before a
+// compile, a Background-C build, any release or realloc; from the render task or the loop task) stops the radio,
+// checks the pool is empty and returns the buffer; once the buffer has been home for kResumeSettleMs the loop task
+// borrows it again and restarts the radio. Background-B's look-ahead is refused while the session is wanted. Lock order
+// for blocking takes: RenderLock, then sessionMutex; the loop task's service only ever tries both.
+std::atomic<bool> sessionWanted{false};
+SemaphoreHandle_t sessionMutex = nullptr;
+uint32_t homeSinceMs = 0;
+uint32_t yieldAtMs = 0;
+uint32_t sessionYields = 0;
+uint32_t sessionResumes = 0;
+uint32_t sessionYieldFails = 0;
+uint32_t sessionResumeDeferred = 0;
+constexpr uint32_t kResumeSettleMs = 3000;
+
+bool borrowPoolBlock() {  // caller holds the render lock
+  if (blepool::base != nullptr) return true;
+  renderer.syncWriteBufferFromDisplayed();
+  size_t size = 0;
+  uint8_t* block = renderer.borrowSecondaryBuffer(&size);
+  if (block == nullptr) return false;
+  blepool::heap = multi_heap_register(block, size);
+  if (blepool::heap == nullptr) {
+    renderer.returnSecondaryBuffer();
+    return false;
+  }
+  multi_heap_set_lock(blepool::heap, &blepool::mux);
+  blepool::base = block;
+  blepool::size = size;
+  blepool::freeAtStart = multi_heap_free_size(blepool::heap);
+  blepool::capturing.store(true);
+  return true;
+}
+
+void returnPoolBlock() {  // caller holds the render lock; the pool is empty
+  blepool::capturing.store(false);
+  blepool::heap = nullptr;
+  blepool::base = nullptr;
+  blepool::size = 0;
+  renderer.returnSecondaryBuffer();
+}
+
+void serviceSessionResume() {  // loop task, under sessionMutex
+  if (!sessionWanted.load() || blepool::base != nullptr || BleHid.isRunning()) return;
+  if (!renderer.hasSecondaryBuffer()) {
+    homeSinceMs = 0;
+    return;
+  }
+  const uint32_t now = millis();
+  if (homeSinceMs == 0) {
+    homeSinceMs = now;
+    return;
+  }
+  if (now - homeSinceMs < kResumeSettleMs) return;
+  constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  if (heap_caps_get_free_size(caps) < 28000 || heap_caps_get_largest_free_block(caps) < 12000) {
+    if (sessionResumeDeferred++ % 50 == 0)
+      logEvent("resume deferred heap %lu/%lu", static_cast<unsigned long>(heap_caps_get_free_size(caps)),
+               static_cast<unsigned long>(heap_caps_get_largest_free_block(caps)));
+    return;
+  }
+  {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (!lock.ownsLock() || !renderer.hasSecondaryBuffer()) return;
+    if (!borrowPoolBlock()) return;
+  }
+  if (clockHoldWanted && !clockHold) {
+    clockHold.emplace();  // the radio comes up at full speed, never from 10 MHz
+    ++clockHoldTakes;
+  }
+  if (!BleHid.begin("WitchSpike")) {
+    logEvent("resume begin failed");
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) returnPoolBlock();
+    return;
+  }
+  armedAtMs = millis();
+  BleHid.armBondedReconnect(freeink::PickPolicy::First, nullptr);
+  ++sessionResumes;
+  logEvent("resume %lu ms after the yield", static_cast<unsigned long>(armedAtMs - yieldAtMs));
+  homeSinceMs = 0;
+}
+
+void serviceLinkLocked();
+
 void serviceLink() {
+  if (sessionMutex != nullptr && xSemaphoreTake(sessionMutex, 0) != pdTRUE) return;  // a yield holds it
+  serviceLinkLocked();
+  serviceSessionResume();
+  if (sessionMutex != nullptr) xSemaphoreGive(sessionMutex);
+}
+
+void serviceLinkLocked() {
   serviceFbSession();
   updateClockHold();
   if (!BleHid.isRunning()) {
@@ -524,6 +618,10 @@ bool ensureHost(std::string& out) {
     out += " error=heap_too_small_for_a_start_without_the_pool";
     return false;
   }
+  if (clockHoldWanted && !clockHold) {
+    clockHold.emplace();
+    ++clockHoldTakes;
+  }
   const uint32_t t0 = millis();
   const bool begun = BleHid.begin("WitchSpike");
   appendNumber(out, "begin_ms", static_cast<long>(millis() - t0));
@@ -591,6 +689,7 @@ std::string reconnect(const std::string_view value) {
 std::string keys(const std::string_view value) {
   serviceFor(parseMs(value, 0, 120000), [] { return false; });
   serviceLink();
+  if (sessionMutex != nullptr) xSemaphoreTake(sessionMutex, portMAX_DELAY);
   std::string out = "BLE_KEYS:";
   appendNumber(out, "now", static_cast<long>(millis()));
   appendNumber(out, "connected", BleHid.isConnected() ? 1 : 0);
@@ -602,6 +701,10 @@ std::string keys(const std::string_view value) {
   appendNumber(out, "dropped", static_cast<long>(logDropped));
   logCount = 0;
   logDropped = 0;
+  appendNumber(out, "yields", static_cast<long>(sessionYields));
+  appendNumber(out, "resumes", static_cast<long>(sessionResumes));
+  appendNumber(out, "yield_fails", static_cast<long>(sessionYieldFails));
+  if (sessionMutex != nullptr) xSemaphoreGive(sessionMutex);
   return out;
 }
 
@@ -681,7 +784,43 @@ void appendPool(std::string& out) {
   appendNumber(out, "capturing", blepool::capturing.load() ? 1 : 0);
 }
 
+std::string poolSession(const bool on) {
+  std::string out = "BLE_SESSION:";
+  appendInternal(out, "pre");
+  if (sessionMutex == nullptr) sessionMutex = xSemaphoreCreateMutex();
+  if (on) {
+    sessionWanted.store(true);
+    homeSinceMs = millis() - kResumeSettleMs;  // resume at the next service tick
+    yieldAtMs = millis();
+  } else {
+    sessionWanted.store(false);
+    RenderLock lock;
+    xSemaphoreTake(sessionMutex, portMAX_DELAY);
+    bool ended = !BleHid.isRunning();
+    for (int i = 0; i < 4 && !ended; ++i) ended = BleHid.end(1000);
+    blepool::capturing.store(false);
+    if (blepool::heap != nullptr) {
+      const size_t used = blepool::freeAtStart - multi_heap_free_size(blepool::heap);
+      appendNumber(out, "left_in_pool", static_cast<long>(used));
+      if (used == 0) returnPoolBlock();
+    }
+    xSemaphoreGive(sessionMutex);
+  }
+  appendNumber(out, "wanted", sessionWanted.load() ? 1 : 0);
+  appendNumber(out, "yields", static_cast<long>(sessionYields));
+  appendNumber(out, "resumes", static_cast<long>(sessionResumes));
+  appendNumber(out, "yield_fails", static_cast<long>(sessionYieldFails));
+  appendNumber(out, "resume_deferred", static_cast<long>(sessionResumeDeferred));
+  appendNumber(out, "has_secondary", renderer.hasSecondaryBuffer() ? 1 : 0);
+  appendPool(out);
+  appendInternal(out, "post");
+  appendMin(out);
+  return out;
+}
+
 std::string pool(const std::string_view value) {
+  if (value == "S") return poolSession(true);
+  if (value == "0" && sessionWanted.load()) return poolSession(false);
   std::string out = "BLE_POOL:";
   appendInternal(out, "pre");
   if (BleHid.isRunning()) return out + " error=host_running";
@@ -733,6 +872,38 @@ std::string pool(const std::string_view value) {
 }  // namespace
 
 void bleSpikeService() { serviceLink(); }
+
+bool bleSessionWanted() { return sessionWanted.load(); }
+
+void bleSessionYieldForBuild(const char* why) {
+  if (!sessionWanted.load() || blepool::base == nullptr || sessionMutex == nullptr) return;
+  // Lock order RenderLock, then sessionMutex. The render task calls this inside a pass, holding the render lock.
+  std::optional<RenderLock> renderLock;
+  if (!RenderLock::heldByCurrentTask()) renderLock.emplace();
+  if (xSemaphoreTake(sessionMutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+    ++sessionYieldFails;
+    return;
+  }
+  if (blepool::base != nullptr) {
+    const uint32_t t0 = millis();
+    bool ended = !BleHid.isRunning();
+    for (int i = 0; i < 4 && !ended; ++i) ended = BleHid.end(1000);
+    blepool::capturing.store(false);
+    const size_t used = blepool::freeAtStart - multi_heap_free_size(blepool::heap);
+    if (!ended || used != 0) {
+      ++sessionYieldFails;
+      logEvent("yield %.12s FAILED ended=%d left=%u", why, ended ? 1 : 0, static_cast<unsigned>(used));
+    } else {
+      returnPoolBlock();
+      ++sessionYields;
+      yieldAtMs = millis();
+      logEvent("yield %.12s %lu ms free=%lu", why, static_cast<unsigned long>(yieldAtMs - t0),
+               static_cast<unsigned long>(esp_get_free_heap_size()));
+    }
+    homeSinceMs = 0;
+  }
+  xSemaphoreGive(sessionMutex);
+}
 
 std::string memState(const char* head) {
   std::string out = head;

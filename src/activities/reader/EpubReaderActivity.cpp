@@ -1843,6 +1843,7 @@ void EpubReaderActivity::resetBackgroundBuild() {
 }
 
 bool EpubReaderActivity::beginBackgroundBorrow() {
+  if (bleSessionWanted()) return false;  // SPIKE: no look-ahead while a BLE session owns the buffer
   if (backgroundBorrowActive_ || secondaryBorrowed_ || !backgroundSection_) {
     return false;  // already lent (to B or to C) — never two arenas over one region
   }
@@ -5259,6 +5260,7 @@ EpubReaderActivity::SectionBuildMode EpubReaderActivity::chooseSectionBuildMode(
 EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const RenderLayout& layout,
                                                                          const bool embeddedStyle,
                                                                          const uint8_t imageRendering) {
+  bleSessionYieldForBuild("compile");  // SPIKE: the build gets the secondary, the radio restarts after
   // Use a cleaner waveform for the indexing popup right after image pages; a FAST popup refresh
   // can leave visible bleed on X3 transitioning image -> text.
   if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
@@ -5883,6 +5885,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
           // fail (the realloc-failure / heap-recovery-restart class of bugs is impossible). The
           // build's arena bump-allocates inside the lent region instead of the heap. Fall back to
           // the legacy release only when there is no secondary buffer to lend.
+          bleSessionYieldForBuild("background-c");  // SPIKE
           size_t borrowedSize = 0;
           uint8_t* borrowed = lend == Lend::DuringRefresh ? renderer.borrowSecondaryBufferDuringRefresh(&borrowedSize)
                                                           : renderer.borrowSecondaryBuffer(&borrowedSize);
