@@ -79,3 +79,23 @@ What it decides: releasing the secondary is not enough. Scheme D needs builds (a
 the write buffer while the old page stays on the glass, a reader that knows the session (no realloc retries), the
 radio's memory kept out of the general heap (a pool in the released block, so the heap keeps its shape), and a link
 supervision timeout above the longest build stall (the SDK's own 8 s, not the remote's 6 s).
+
+## E1: the CPU clock, not the builds, broke the link (2026-11-28)
+
+The third analysis found that the C3 drops to 10 MHz in every refresh's waveform wait and after 500 ms idle
+(`HalPowerManager`), refused only while Wi-Fi is up, and that this probe never held the clock while the host ran
+(CrossPoint holds it, `upstream/develop src/main.cpp:310-314`; #953 does on the S3). `CMD:BLE:CLOCK=0|1` holds a
+`HalPowerManager::Lock` while the host runs. On Settings with the secondary released (NimBLE up: 43,060 free /
+30,708 largest), the Free2 linked, 40 refreshes (`BTN:DOWN`/`UP`, 2.5 s apart), the owner pressing 10 times:
+
+| | link | presses delivered |
+|---|---|---|
+| clock held | up for all 110 s, no drop | 13 of 13 (a wake press, 10, a double press) |
+| clock not held | dropped 31 s after the hold went; 6 reconnects failed at service discovery ("No HID input report", "Not a HID device") | 0 of 10 |
+
+With the hold back on, the link came back by itself within seconds. So M2's 13 drops and its "no HID service"
+reconnects were the clock; the soak's heap failures (aborted parses, dropped pictures, the secondary not coming back)
+stand on their own.
+
+Also seen: `BleHid.begin()` on Settings with both framebuffers (44,024 free / 30,708 largest) hung the loop task inside
+NimBLE's init, with no reply and no log, until a reset. A C3 start needs a heap check before `begin()`, as #953 has on the S3.

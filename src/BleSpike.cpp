@@ -11,6 +11,7 @@
 // CMD:BLE:RECONNECT[=ms]   begin() if down, arm the bonded reconnect, wait for the link: a radio restart.
 // CMD:BLE:KEYS[=ms]        wait, then return and clear the log: link up/down, link_ms, keys, raw edges, times.
 // CMD:BLE:LINK, FORGET=addr, DISCONNECT, PARAMS=0|1 (accept the remote's connection parameters).
+// CMD:BLE:CLOCK=0|1        hold the CPU clock at full speed while the host runs (default 1).
 // CMD:BLE:FB=0|S|1         release the secondary framebuffer once / keep it released (session) / take it back.
 // CMD:BLE:KEEP=0|1  whether the next boot keeps the controller's memory (initArduino() releases it when bleInUse()
 //                   says no); takes effect after CMD:REBOOT. CMD:BLE:MEM reports the current state.
@@ -23,6 +24,7 @@
 #include <Arduino.h>
 #include <BleKeyboardHost.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalSystem.h>
 #include <esp32-hal-bt.h>
 #include <esp_bt.h>
@@ -36,6 +38,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -317,8 +320,25 @@ void serviceFbSession() {
   }
 }
 
+// CMD:BLE:CLOCK=0|1 (default 1): hold the CPU at full speed while the host runs. Without it the C3 drops to 10 MHz
+// in every refresh's waveform wait and after 500 ms idle (HalPowerManager), which the radio does not survive.
+bool clockHoldWanted = true;
+std::optional<HalPowerManager::Lock> clockHold;
+uint32_t clockHoldTakes = 0;
+
+void updateClockHold() {
+  const bool want = clockHoldWanted && BleHid.isRunning();
+  if (want && !clockHold) {
+    clockHold.emplace();
+    ++clockHoldTakes;
+  } else if (!want && clockHold) {
+    clockHold.reset();
+  }
+}
+
 void serviceLink() {
   serviceFbSession();
+  updateClockHold();
   if (!BleHid.isRunning()) {
     lastConnected = false;
     return;
@@ -476,6 +496,7 @@ std::string link() {
     appendNumber(out, "latency", latency);
     appendNumber(out, "timeout", timeout);
   }
+  appendNumber(out, "clock_held", clockHold ? 1 : 0);
   appendNumber(out, "bonds", BleHid.pairedCount());
   for (uint8_t i = 0; i < BleHid.pairedCount(); ++i) {
     out += " [";
@@ -564,6 +585,15 @@ std::string bleSpikeRun(const std::string_view arg) {
   if (name == "LINK") return link();
   if (name == "FORGET") return forget(value);
   if (name == "FB") return framebuffer(value);
+  if (name == "CLOCK") {
+    clockHoldWanted = value != "0";
+    updateClockHold();
+    std::string out = "BLE_CLOCK:";
+    appendNumber(out, "hold_wanted", clockHoldWanted ? 1 : 0);
+    appendNumber(out, "held", clockHold ? 1 : 0);
+    appendNumber(out, "takes", static_cast<long>(clockHoldTakes));
+    return out;
+  }
   if (name == "PARAMS") {  // accept (1) or reject (0) the peripheral's connection-parameter requests
     bleSpikeAcceptConnParams(value == "1");
     return std::string("BLE_PARAMS: accept=") + (value == "1" ? "1" : "0");
