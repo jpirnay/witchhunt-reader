@@ -153,8 +153,14 @@ One concern per PR; each on X4 Pro, T5S3 and Picco (Murphy, X4 Classic, EEGO A4 
    #4416's bug). With it the SDK's connection-parameter fix above (`acceptPeerConnParams`, Free-Ink branch
    `fix/ble-accept-peer-conn-params`). A per-remote swap of the two directions (the Free2's right key sends Left
    Arrow) and learned bindings come with step 3.
-3. **Settings row and pairing screen**: one `SettingsList.h` row with a `SettingRequires` value; scan, pair, forget;
-   the bond store the SDK keeps.
+3. **Settings row and pairing screen** (in review): Settings > Controls > Bluetooth Remote
+   (`src/activities/settings/BleRemoteActivity`): on/off (`bleRemote`), a search that lists HID remotes first, pair,
+   forget, Swap Remote Keys (`bleSwapKeys`, global). The radio follows the setting (`BleRadioPolicy::decide`): up while
+   it is on and a remote is saved or the screen is open, paused while Wi-Fi is up, asleep after the idle time until a
+   book opens, a key is pressed in one, or the screen opens. A Toggle Bluetooth Remote button/gesture action
+   (`BTN_TOGGLE_BLE_REMOTE`, offered only where `HalCapabilities::hasBleRadio()`, `ButtonActionOptions.h`); switching on
+   with no remote saved opens the screen on its search. Learned bindings per remote (CrossPoint's map buttons) are not
+   in it.
 4. **Wi-Fi beside a remote** on the S3: a background KOReader sync and a File Transfer session with a remote linked.
 5. **Release envs** on, after a soak with a real remote (Free3, Free2, a BOOX Keypage, a volume-key shutter).
 
