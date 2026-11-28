@@ -99,3 +99,27 @@ stand on their own.
 
 Also seen: `BleHid.begin()` on Settings with both framebuffers (44,024 free / 30,708 largest) hung the loop task inside
 NimBLE's init, with no reply and no log, until a reset. A C3 start needs a heap check before `begin()`, as #953 has on the S3.
+
+## E2: the radio's memory in a pool inside the lent secondary framebuffer (2026-11-28)
+
+`CMD:BLE:POOL=1` borrows the secondary framebuffer (52,272 B, never in the heap) and registers it as a private
+`multi_heap`; the controller's OSI allocator (`btdm_osi_funcs_register`, its `_malloc`/`_malloc_internal`/`_free`
+patched in the heap copy bt.c passes) and NimBLE-Arduino's `nimble_platform_mem_malloc/calloc/free` (`--wrap`, all
+22 call sites) are served from it while it captures; frees go back to the block's own heap. `POOL=0` returns the
+buffer only when the pool is empty. Clock held, the Free2 linked, `alice-illustrated.epub`, five sessions of 30 page
+turns, the radio stopped and the buffer returned after each:
+
+| every one of the 5 sessions | |
+|---|---|
+| link after a restart | 3,740-3,811 ms |
+| pool used (peak) | 34,216 B (34,272), 91 allocations, 0 failed, 0 routed to the heap |
+| general heap while the session runs, free / largest | ~39,700 / 36,852 (before: 59,768 / 51,188) |
+| radio memory outside the pool (stacks, C++ objects, queues) | ~20.0 KB |
+| pool after the stop | empty |
+| secondary returned, largest block after | yes, 51,188 (unchanged) |
+
+About 500 B stayed out of the general heap after the first session, nothing after the later ones; presses arrived in
+every session. Against Fable's bar (pool < 44 KB, < 22 KB outside, pool empty after every stop, largest block
+unchanged): passed. What it does not answer yet: a chapter build during a session (39.7 KB free, no secondary as
+scratch): the radio has to yield the block (stop, return, build, borrow, restart: 3.8 s of a deaf remote per build).
+The X4 (48,000 B block, its fast refresh needs the secondary) is not measured.

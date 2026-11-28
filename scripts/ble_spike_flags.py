@@ -20,3 +20,8 @@ def _ble_flags(build_env, node):
 
 
 env.AddBuildMiddleware(_ble_flags)  # noqa: F821
+
+# E2 (src/BleSpike.cpp, blepool): the controller's OSI table and NimBLE's allocator, routed to the pool while it captures.
+env.Append(  # noqa: F821
+    LINKFLAGS=["-Wl,--wrap=btdm_osi_funcs_register", "-Wl,--wrap=nimble_platform_mem_malloc",
+               "-Wl,--wrap=nimble_platform_mem_calloc", "-Wl,--wrap=nimble_platform_mem_free"])

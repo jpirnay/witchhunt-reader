@@ -12,6 +12,7 @@
 // CMD:BLE:KEYS[=ms]        wait, then return and clear the log: link up/down, link_ms, keys, raw edges, times.
 // CMD:BLE:LINK, FORGET=addr, DISCONNECT, PARAMS=0|1 (accept the remote's connection parameters).
 // CMD:BLE:CLOCK=0|1        hold the CPU clock at full speed while the host runs (default 1).
+// CMD:BLE:POOL=1|0, POOLSTAT  the radio's memory in a pool in the lent secondary framebuffer (E2).
 // CMD:BLE:FB=0|S|1         release the secondary framebuffer once / keep it released (session) / take it back.
 // CMD:BLE:KEEP=0|1  whether the next boot keeps the controller's memory (initArduino() releases it when bleInUse()
 //                   says no); takes effect after CMD:REBOOT. CMD:BLE:MEM reports the current state.
@@ -32,10 +33,12 @@
 #include <esp_intr_alloc.h>
 #include <esp_memory_utils.h>
 #include <esp_system.h>
+#include <multi_heap.h>
 #include <nvs.h>
 
 #include <atomic>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -45,6 +48,120 @@
 #include "activities/RenderLock.h"
 
 extern GfxRenderer renderer;  // main.cpp
+
+// ---- E2: the radio's memory in a pool carved from the lent secondary framebuffer ---------------------------------
+// CMD:BLE:POOL=1 borrows the secondary framebuffer (it never enters the heap) and registers it as a private multi_heap;
+// while it captures, the controller's OSI allocations (btdm_osi_funcs_register, patched below) and NimBLE's
+// (nimble_platform_mem_*, linked with --wrap, scripts/ble_spike_flags.py) are served from it. Every free goes back to
+// where its block came from, captured or not. POOL=0 (radio down) returns the buffer only when the pool is empty.
+// C++ objects (NimBLE-Arduino, the SDK), task stacks and FreeRTOS queues stay on the general heap.
+namespace blepool {
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+multi_heap_handle_t heap = nullptr;
+uint8_t* base = nullptr;
+size_t size = 0;
+size_t freeAtStart = 0;
+std::atomic<bool> capturing{false};
+std::atomic<uint32_t> poolAllocs{0};
+std::atomic<uint32_t> poolFails{0};
+std::atomic<uint32_t> heapAllocs{0};
+std::atomic<uint32_t> peakUsed{0};
+
+bool contains(const void* p) {
+  return base != nullptr && static_cast<const uint8_t*>(p) >= base && static_cast<const uint8_t*>(p) < base + size;
+}
+
+void* take(const size_t n) {
+  if (!capturing.load() || heap == nullptr) return nullptr;
+  void* p = multi_heap_malloc(heap, n);
+  if (p == nullptr) {
+    poolFails.fetch_add(1);
+    return nullptr;
+  }
+  poolAllocs.fetch_add(1);
+  const uint32_t used = static_cast<uint32_t>(freeAtStart - multi_heap_free_size(heap));
+  if (used > peakUsed.load()) peakUsed.store(used);
+  return p;
+}
+
+bool give(void* p) {
+  if (p == nullptr || !contains(p)) return false;
+  multi_heap_free(heap, p);
+  return true;
+}
+}  // namespace blepool
+
+extern "C" {
+void* __real_nimble_platform_mem_malloc(size_t size);
+void* __real_nimble_platform_mem_calloc(size_t n, size_t size);
+void __real_nimble_platform_mem_free(void* ptr);
+int __real_btdm_osi_funcs_register(void* funcs);
+
+void* __wrap_nimble_platform_mem_malloc(size_t size) {
+  if (void* p = blepool::take(size)) return p;
+  if (blepool::capturing.load()) blepool::heapAllocs.fetch_add(1);
+  return __real_nimble_platform_mem_malloc(size);
+}
+
+void* __wrap_nimble_platform_mem_calloc(size_t n, size_t size) {
+  if (void* p = blepool::take(n * size)) {
+    memset(p, 0, n * size);
+    return p;
+  }
+  if (blepool::capturing.load()) blepool::heapAllocs.fetch_add(1);
+  return __real_nimble_platform_mem_calloc(n, size);
+}
+
+void __wrap_nimble_platform_mem_free(void* ptr) {
+  if (!blepool::give(ptr)) __real_nimble_platform_mem_free(ptr);
+}
+}
+
+namespace {
+// The head of IDF v5.5.5's struct osi_funcs_t (components/bt/controller/esp32c3/bt.c:180): magic, version, 27 function
+// pointers, then _malloc, _malloc_internal, _free. bt.c copies its table to the heap and passes that copy.
+struct OsiHead {
+  uint32_t magic;
+  uint32_t version;
+  void* before[27];
+  void* (*mallocFn)(size_t);
+  void* (*mallocInternalFn)(size_t);
+  void (*freeFn)(void*);
+};
+static_assert(offsetof(OsiHead, mallocFn) == 8 + 27 * sizeof(void*), "osi_funcs_t layout");
+void* (*origOsiMalloc)(size_t) = nullptr;
+void* (*origOsiMallocInternal)(size_t) = nullptr;
+void (*origOsiFree)(void*) = nullptr;
+std::atomic<bool> osiPatched{false};
+
+void* osiMalloc(size_t n) {
+  if (void* p = blepool::take(n)) return p;
+  if (blepool::capturing.load()) blepool::heapAllocs.fetch_add(1);
+  return origOsiMalloc(n);
+}
+void* osiMallocInternal(size_t n) {
+  if (void* p = blepool::take(n)) return p;
+  if (blepool::capturing.load()) blepool::heapAllocs.fetch_add(1);
+  return origOsiMallocInternal(n);
+}
+void osiFree(void* p) {
+  if (!blepool::give(p)) origOsiFree(p);
+}
+}  // namespace
+
+extern "C" int __wrap_btdm_osi_funcs_register(void* funcs) {
+  auto* head = static_cast<OsiHead*>(funcs);
+  if (head != nullptr && head->magic == 0xFADEBEAD && head->version == 0x0001000B) {
+    origOsiMalloc = head->mallocFn;
+    origOsiMallocInternal = head->mallocInternalFn;
+    origOsiFree = head->freeFn;
+    head->mallocFn = osiMalloc;
+    head->mallocInternalFn = osiMallocInternal;
+    head->freeFn = osiFree;
+    osiPatched.store(true);
+  }
+  return __real_btdm_osi_funcs_register(funcs);
+}
 
 // Strong override of the core's weak bleInUse() (esp32-hal-bt.c): initArduino() calls it right after
 // nvs_flash_init() and releases the controller's memory for good when it returns false. Read from NVS, so one
@@ -400,6 +517,13 @@ bool ensureHost(std::string& out) {
     appendNumber(out, "begin_ms", 0);
     return true;
   }
+  // NimBLE's init hung the loop task with 44,024 free / 30,708 largest (X3, Settings, both framebuffers): refuse a
+  // start without the pool unless a block that size is there.
+  constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  if (!blepool::capturing.load() && heap_caps_get_largest_free_block(caps) < 40000) {
+    out += " error=heap_too_small_for_a_start_without_the_pool";
+    return false;
+  }
   const uint32_t t0 = millis();
   const bool begun = BleHid.begin("WitchSpike");
   appendNumber(out, "begin_ms", static_cast<long>(millis() - t0));
@@ -540,6 +664,72 @@ std::string framebuffer(const std::string_view value) {
   return out;
 }
 
+void appendPool(std::string& out) {
+  appendNumber(out, "osi_patched", osiPatched.load() ? 1 : 0);
+  appendNumber(out, "pool_size", static_cast<long>(blepool::size));
+  if (blepool::heap != nullptr) {
+    appendNumber(out, "pool_used", static_cast<long>(blepool::freeAtStart - multi_heap_free_size(blepool::heap)));
+    multi_heap_info_t info = {};
+    multi_heap_get_info(blepool::heap, &info);
+    appendNumber(out, "pool_largest", static_cast<long>(info.largest_free_block));
+    appendNumber(out, "pool_min_free", static_cast<long>(info.minimum_free_bytes));
+  }
+  appendNumber(out, "pool_peak", static_cast<long>(blepool::peakUsed.load()));
+  appendNumber(out, "pool_allocs", static_cast<long>(blepool::poolAllocs.load()));
+  appendNumber(out, "pool_fails", static_cast<long>(blepool::poolFails.load()));
+  appendNumber(out, "heap_allocs", static_cast<long>(blepool::heapAllocs.load()));
+  appendNumber(out, "capturing", blepool::capturing.load() ? 1 : 0);
+}
+
+std::string pool(const std::string_view value) {
+  std::string out = "BLE_POOL:";
+  appendInternal(out, "pre");
+  if (BleHid.isRunning()) return out + " error=host_running";
+  if (value == "1") {
+    if (blepool::base != nullptr) return out + " error=already_borrowed";
+    {
+      RenderLock lock;
+      renderer.syncWriteBufferFromDisplayed();
+      size_t size = 0;
+      uint8_t* block = renderer.borrowSecondaryBuffer(&size);
+      if (block == nullptr) return out + " error=borrow_refused";
+      blepool::heap = multi_heap_register(block, size);
+      if (blepool::heap == nullptr) {
+        renderer.returnSecondaryBuffer();
+        return out + " error=register_failed";
+      }
+      multi_heap_set_lock(blepool::heap, &blepool::mux);
+      blepool::base = block;
+      blepool::size = size;
+      blepool::freeAtStart = multi_heap_free_size(blepool::heap);
+    }
+    blepool::peakUsed.store(0);
+    blepool::poolAllocs.store(0);
+    blepool::poolFails.store(0);
+    blepool::heapAllocs.store(0);
+    blepool::capturing.store(true);
+  } else {
+    blepool::capturing.store(false);
+    if (blepool::heap != nullptr) {
+      const size_t used = blepool::freeAtStart - multi_heap_free_size(blepool::heap);
+      appendNumber(out, "left_in_pool", static_cast<long>(used));
+      if (used != 0) {
+        appendPool(out);
+        return out + " error=pool_not_empty_buffer_kept";
+      }
+      RenderLock lock;
+      blepool::heap = nullptr;
+      blepool::base = nullptr;
+      blepool::size = 0;
+      appendNumber(out, "returned", renderer.returnSecondaryBuffer() ? 1 : 0);
+    }
+  }
+  appendNumber(out, "has_secondary", renderer.hasSecondaryBuffer() ? 1 : 0);
+  appendPool(out);
+  appendInternal(out, "post");
+  return out;
+}
+
 }  // namespace
 
 void bleSpikeService() { serviceLink(); }
@@ -585,6 +775,13 @@ std::string bleSpikeRun(const std::string_view arg) {
   if (name == "LINK") return link();
   if (name == "FORGET") return forget(value);
   if (name == "FB") return framebuffer(value);
+  if (name == "POOL") return pool(value);
+  if (name == "POOLSTAT") {
+    std::string out = "BLE_POOLSTAT:";
+    appendPool(out);
+    appendInternal(out, "internal");
+    return out;
+  }
   if (name == "CLOCK") {
     clockHoldWanted = value != "0";
     updateClockHold();
