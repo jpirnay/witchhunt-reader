@@ -125,9 +125,14 @@ One concern per PR; each on X4 Pro, T5S3 and Picco (Murphy, X4 Classic, EEGO A4 
    sleep and an idle time without a link, declines light sleep while up (`HalPowerManager`); a `HalCapabilities`
    predicate; no FreeRTOS task of an activity's. Host tests for its rules (CrossPoint's `RadioPolicy.h` is a model,
    with our numbers).
-2. **Input** (with the SDK's connection-parameter fix above): remote keys enter through `HalGPIO::injectPress()` with the physical index the user's mapping gives Page
-   Forward / Page Back, so remapping, press types, the reading statistics and the sleep timer all apply (CrossPoint's
-   separate path is #4416's bug). Default key table for the common page turners; tap and hold.
+2. **Input** (in review): `src/BleRemoteKeys.h` turns the SDK's raw button edges into Page Forward / Page Back presses
+   (arrows, Page Up/Down, Space, the consumer volume keys; the SDK's Free3 and BOOX Keypage profiles by raw code), a
+   hold from the remote's own press and release times at the hardware buttons' 1 s; `BleRadio` injects each through
+   `MappedInputManager::injectRawPress()` with the physical index the user's mapping gives the button, so remapping,
+   press types, button actions, the reading statistics and the sleep timer all apply (CrossPoint's separate path is
+   #4416's bug). With it the SDK's connection-parameter fix above (`acceptPeerConnParams`, Free-Ink branch
+   `fix/ble-accept-peer-conn-params`). A per-remote swap of the two directions (the Free2's right key sends Left
+   Arrow) and learned bindings come with step 3.
 3. **Settings row and pairing screen**: one `SettingsList.h` row with a `SettingRequires` value; scan, pair, forget;
    the bond store the SDK keeps.
 4. **Wi-Fi beside a remote** on the S3: a background KOReader sync and a File Transfer session with a remote linked.
