@@ -68,7 +68,8 @@
 #endif
 
 #if SERIAL_TEST_API
-extern GfxRenderer renderer;  // main.cpp: CMD:LAB draws into its frame buffer
+extern GfxRenderer renderer;                    // main.cpp: CMD:LAB draws into its frame buffer
+std::string bleSpikeRun(std::string_view arg);  // BleSpike.cpp (spike only)
 #endif
 
 namespace SerialTestApi {
@@ -2213,6 +2214,10 @@ void cmdWeb(const std::string_view arg) {
 
 void cmdHelp(std::string_view arg);
 
+#if SERIAL_TEST_API
+void cmdBle(const std::string_view arg) { reply(::bleSpikeRun(arg)); }
+#endif
+
 using Handler = void (*)(std::string_view arg);
 struct Command {
   const char* name;
@@ -2225,7 +2230,7 @@ constexpr Command kCommands[] = {
     {"IDLE", &cmdIdle},       {"EVENTS", &cmdEvents}, {"GET", &cmdGet},     {"SET", &cmdSet},
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
     {"REBOOT", &cmdReboot},   {"HEAP", &cmdHeap},     {"TTF", &cmdTtf},     {"FS", &cmdFs},
-    {"PAGE", &cmdPage},       {"LAB", &cmdLab},       {"IMU", &cmdImu},
+    {"PAGE", &cmdPage},       {"LAB", &cmdLab},       {"IMU", &cmdImu},     {"BLE", &cmdBle},
 #endif
 };
 
