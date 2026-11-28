@@ -34,6 +34,9 @@ class HalPowerManager {
 
   enum LockMode { None, NormalSpeed };
   std::atomic<LockMode> currentLockMode{None};
+  // A Bluetooth LE radio is up (setRadioActive()). Read relaxed, as the Lock is: a change seen one slice late costs
+  // one slice.
+  std::atomic<bool> radioActive_{false};
   SemaphoreHandle_t modeMutex = nullptr;  // Protect Lock acquire/release ordering
   // Task that holds the current NormalSpeed lock (nullptr when none). Guarded by
   // modeMutex. Needed by enterWaveformWait(): the render task holds a Lock for
@@ -72,6 +75,7 @@ class HalPowerManager {
     uint32_t rejUsb = 0;         // declined: host attached
     uint32_t rejFrontlight = 0;  // declined: a PWM frontlight is lit, or touch cannot wake the chip
     uint32_t rejDebounce = 0;    // declined: button change mid-debounce
+    uint32_t rejRadio = 0;       // declined: a Bluetooth LE radio is up (setRadioActive)
     uint32_t rejIdf = 0;         // esp_light_sleep_start() returned non-OK
     // declined: a display refresh was started and not yet finished (HalDisplay::isRefreshPending)
     uint32_t rejRefresh = 0;
@@ -140,6 +144,13 @@ class HalPowerManager {
   // unconditionally.
   void ensureFullSpeed();
 
+  // A Bluetooth LE radio is up (src/BleRadio.cpp, the one caller): while it is, the idle governor and the waveform
+  // wait leave the clock at full speed and lightSleep() declines, as for WiFi. The controller needs the 80 MHz APB
+  // clock, and light sleep without a configured low-power clock stops it. Set it true before begin(), after
+  // ensureFullSpeed(), and false only once the radio's end() finished.
+  void setRadioActive(bool active) { radioActive_.store(active, std::memory_order_relaxed); }
+  bool radioActive() const { return radioActive_.load(std::memory_order_relaxed); }
+
   // Waveform-wait power hooks, installed on the display driver by HalDisplay:
   // drop the CPU clock while the render task sleeps on the e-ink BUSY-ISR
   // semaphore (nothing can run during the waveform — background work gates on
@@ -155,8 +166,8 @@ class HalPowerManager {
 
   // Light-sleep the CPU for LIGHT_SLEEP_SLICE_MS (timer wake; buttons are polled on
   // wake at the same cadence as the delay() this replaces). Returns false WITHOUT
-  // sleeping when unsafe: a performance Lock is held (render in flight), WiFi is
-  // active, USB is connected (light sleep kills the CDC link), the board has a PWM
+  // sleeping when unsafe: a performance Lock is held (render in flight), WiFi or a
+  // Bluetooth LE radio is active, USB is connected (light sleep kills the CDC link), the board has a PWM
   // frontlight (light sleep stops LEDC and the light would flicker), or a button
   // change is mid-debounce. The caller must fall back to delay() in that case. Call from
   // the main loop only — light sleep halts the whole chip, including the button

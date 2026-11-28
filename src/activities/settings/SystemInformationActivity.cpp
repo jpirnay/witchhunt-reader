@@ -349,7 +349,7 @@ void SystemInformationActivity::render(RenderLock&&) {
       uint32_t count;
     } reasons[] = {{"lock", raw.rejLock},        {"wifi", raw.rejWifi},     {"usb", raw.rejUsb},
                    {"front", raw.rejFrontlight}, {"dbnc", raw.rejDebounce}, {"idf", raw.rejIdf},
-                   {"rfsh", raw.rejRefresh}};
+                   {"rfsh", raw.rejRefresh},     {"ble", raw.rejRadio}};
     int n = 0;
     buf[0] = '\0';
     for (const auto& r : reasons) {
