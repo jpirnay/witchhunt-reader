@@ -233,18 +233,14 @@ cannot drift apart.
 
 ### Ordering
 
-- `BUTTON_ACTION` is positional. `SettingsList` builds each option list by position (index *i* is
-  value *i*), and stored settings hold the value. Board-gated actions (the light block, then the
-  warm/cool pair, a strict subset of it) stay at the end of the enum in narrowing order, so
-  dropping them on a board without the hardware renumbers nothing. `buildSettings()` asserts
-  the list length against `BUTTON_ACTION_COUNT`, because the failure is a silent shift of every
-  stored mapping, not a crash.
-- A new unconditional action goes above the gated block, which shifts the gated values by one.
-  Stored gesture mappings are then reset with a `GESTURE_DEFAULTS_VERSION` bump (version 2 was
-  exactly this); button mappings have no such stamp.
-- A default must not name a board-gated action unless `CrossPointSettings::dropUnsupportedActions()`
-  cleans up after it. `main.cpp` calls it right after `Frontlight.begin()`, which also rescues an
-  SD card moved from a board with a light to one without.
+- `BUTTON_ACTION` values are not positions. `src/ButtonActionOptions.h` lists every action with its label and what
+  the board needs for it (a light, a warm channel); each button and gesture row offers what the board can do and
+  stores the action itself (`SettingInfo::withOptionValues`), so an action only some boards have can go anywhere in
+  the enum. `settings.json` stores actions by name (`src/ButtonActionNames.h`); a new action needs a name there and a
+  line in `ButtonActionOptions::ALL`, whose `static_assert` checks that every action is listed once.
+- A stored action the board does not offer loads as the row's default (`JsonSettingsIO`). A default must not name a
+  board-gated action unless `CrossPointSettings::dropUnsupportedActions()` cleans up after it; `main.cpp` calls it
+  right after `Frontlight.begin()`.
 - `ActivityManager::loop()` resolves a list swipe before a list tap: the SDK reports both for a
   contact whose travel sits near the threshold, and the swipe suppresses the contact when it
   claims it. The light-panel edge swipe goes before both, so a full-screen list does not read it

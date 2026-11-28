@@ -28,8 +28,16 @@ void store(const SettingInfo& s, const uint8_t value) {
 
 bool readNumber(const SettingInfo& s, int& out) {
   switch (s.type) {
-    case SettingType::TOGGLE:
     case SettingType::ENUM:
+      // The option, not the stored value: the web page and the serial API index the option list, and a row whose
+      // options store other values (a button action row) lists them in a different order.
+      if (s.enumOptionOfValueFn) {
+        if (!s.valuePtr && !s.valueGetter) return false;
+        out = s.getEnumSelectedIndex();
+        return true;
+      }
+      [[fallthrough]];
+    case SettingType::TOGGLE:
     case SettingType::VALUE:
     case SettingType::ACTION:
       if (s.valuePtr) {
@@ -67,7 +75,7 @@ WriteResult writeNumber(const SettingInfo& s, const int value) {
       return WriteResult::Applied;
     case SettingType::ENUM:
       if (value < 0 || value >= optionCount(s)) return WriteResult::OutOfRange;
-      store(s, static_cast<uint8_t>(value));
+      store(s, s.enumValueOf(static_cast<uint8_t>(value)));
       return WriteResult::Applied;
     case SettingType::VALUE:
       if (value < s.valueRange.min || value > s.valueRange.max) return WriteResult::OutOfRange;

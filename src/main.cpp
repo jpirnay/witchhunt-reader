@@ -46,6 +46,7 @@
 
 #include "BleRadio.h"
 #include "BootDiagnostics.h"
+#include "ButtonActionCaps.h"
 #include "ButtonEventManager.h"
 #include "CjkUiFonts.h"
 #include "CjkUiPack.h"
@@ -1766,8 +1767,7 @@ void setup() {
   // does not offer it here). By the profile, as the settings list offers the light
   // actions: a light that did not answer this boot's begin() (the BOOX Picco's is
   // probed on I2C) would otherwise lose its bindings for good with the next save.
-  CrossPointSettings::dropUnsupportedActions(SETTINGS, HalCapabilities::hasFrontlight(),
-                                             HalCapabilities::hasColorTemperature());
+  CrossPointSettings::dropUnsupportedActions(SETTINGS, ButtonActionOptions::boardCaps());
   // Navigation follows the screen, not the panel: rotating the device rotates which physical
   // button means "up". The input layer sits below the renderer and so cannot ask it directly —
   // this bridges the two, and is queried live so it can never go stale.

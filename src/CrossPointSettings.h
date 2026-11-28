@@ -12,6 +12,10 @@
 #include "components/themes/PanelMetrics.h"
 #include "util/DictionaryRegistry.h"
 
+namespace ButtonActionOptions {
+struct Caps;
+}
+
 class CrossPointSettings {
  private:
   // Private constructor for singleton
@@ -926,8 +930,8 @@ class CrossPointSettings {
   // fixed action into the defaults. BTN_IGNORE is the opposite: explicitly do
   // nothing and suppress the built-in behaviour for that press.
   //
-  // settings.json stores these by name (ButtonActionNames.h), so a new value can go anywhere above the board-gated
-  // block, given a name there and its label at the same place in SettingsList.h's option list.
+  // settings.json stores these by name (ButtonActionNames.h), so a new value can go anywhere, given a name there and
+  // a line in ButtonActionOptions.h (its label and what the board needs for it).
   enum BUTTON_ACTION {
     BTN_DEFAULT = 0,
     BTN_PAGE_FORWARD,
@@ -990,20 +994,12 @@ class CrossPointSettings {
     // Touch Lock on or off (touchLock). Global. Bind it to a key: a gesture can switch the lock on, but no gesture
     // reaches the device while it is on.
     BTN_TOGGLE_TOUCH_LOCK,
-    // --- Board-gated actions MUST stay at the end of this enum ---------------
-    // SettingsList builds each button's option list positionally: index i in the
-    // list is action value i. Actions it drops on boards that cannot perform them
-    // therefore have to be the LAST entries, or dropping them would shift every
-    // option after them off its value. Add unconditional actions above this line.
+    // An action only some boards can perform is listed in ButtonActionOptions.h with what it needs; the settings
+    // rows offer it only there and store the action itself, so it can go anywhere in this enum. Stored by name
+    // (ButtonActionNames.h), so a new one needs a name there too.
     //
     // Frontlight/backlight control. Global rather than reader-scoped: the light
     // is as wanted on the home screen as it is mid-page.
-    //
-    // TWO gated blocks, in NARROWING order — the warm pair needs a second LED
-    // channel that most lit boards do not have, so it is a strict subset of the
-    // block above and must come after it. Dropping the narrower block on a
-    // single-channel board then leaves the wider one's values untouched, which
-    // is the whole reason the gated actions sit at the end.
     BTN_LIGHT_TOGGLE,
     BTN_LIGHT_BRIGHTER,
     BTN_LIGHT_DIMMER,
@@ -1116,14 +1112,10 @@ class CrossPointSettings {
   // Reset every button and gesture mapping that names an action this board
   // cannot perform back to BTN_DEFAULT.
   //
-  // Two things need it. The board-gated actions are dropped from the settings
-  // screen's option list, so a stored value naming one would render blank and
-  // could not be edited away; and an SD card moved from a board with a
-  // frontlight to one without carries exactly such values. The capabilities are
-  // passed in rather than queried so this stays free of the HAL and testable on
-  // the host. hasWarmLight is the narrower of the two: a board can have a light
-  // and no second warm channel, and then only the warmth pair goes.
-  static void dropUnsupportedActions(CrossPointSettings& settings, bool hasFrontlight, bool hasWarmLight);
+  // A default can name one: double Power and the top-left corner hold switch the light. A stored value cannot, since
+  // the load keeps only what the board offers (JsonSettingsIO). What a board offers is ButtonActionOptions::offered();
+  // the capabilities are passed in so this stays testable on the host.
+  static void dropUnsupportedActions(CrossPointSettings& settings, const ButtonActionOptions::Caps& caps);
 
   // True for an action only the reader can carry out. Such an action must NOT be
   // consumed on another screen: doing so would swallow the input and shadow that

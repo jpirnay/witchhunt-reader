@@ -202,7 +202,8 @@ Formats: `docs/file-formats.md`, `docs/sidecar-files.md`.
   the serial `GET`/`SET`. `JsonSettingsIO` saves each keyed row in `settings.json`, enums as numbers,
   and loads the row's default when the key is missing. Append new enum values; never renumber. The
   button and gesture actions are the exception: stored by name (`src/ButtonActionNames.h`), so a new
-  action goes anywhere above the board-gated block and needs only a name there.
+  action goes anywhere in the enum, with a name there and a line in `src/ButtonActionOptions.h` (its label and what
+  the board needs for it).
 
 ## Generated files
 
