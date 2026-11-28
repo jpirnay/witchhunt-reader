@@ -128,8 +128,8 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   }
 
   auto wifiMode = WiFi.getMode();
-  if (wifiMode != WIFI_MODE_NULL) {
-    // Wifi is active, force disabling power saving
+  if (wifiMode != WIFI_MODE_NULL || radioActive()) {
+    // A radio is up (WiFi or Bluetooth LE): force disabling power saving
     enabled = false;
   }
 
@@ -203,8 +203,8 @@ void HalPowerManager::enterWaveformWait() {
     // Scaling here would be the most frequent PSRAM-clock change in the build.
     return;
   }
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    return;  // WiFi requires the 80 MHz APB clock
+  if (WiFi.getMode() != WIFI_MODE_NULL || radioActive()) {
+    return;  // WiFi and the Bluetooth LE controller require the 80 MHz APB clock
   }
   xSemaphoreTake(modeMutex, portMAX_DELAY);
   // A NormalSpeed lock held by ANOTHER task means full-speed code is running
@@ -299,6 +299,10 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // Light sleep drops a WiFi association and kills an enumerated USB-CDC link.
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     lightSleepStats_.rejWifi++;
+    return false;
+  }
+  if (radioActive()) {
+    lightSleepStats_.rejRadio++;
     return false;
   }
   if (gpio.isUsbConnectedCached()) {
