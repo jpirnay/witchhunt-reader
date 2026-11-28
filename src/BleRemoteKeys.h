@@ -19,8 +19,8 @@ enum class Target : uint8_t { None, PageForward, PageBack };
 inline constexpr uint32_t kHoldMs = 1000;
 
 // A key the SDK's decoder read (its HID usage, or the low byte of a consumer usage). Page turners in a keyboard mode
-// send arrows, Page Up/Down, Space or Enter; others send consumer keys. The set is CrossPoint's (lib/BlePageTurner,
-// pageActionFor), except that the volume pair turns the other way there: Volume Up forward.
+// send arrows, Page Up/Down, Space or Enter; others send consumer keys. The set and the directions are CrossPoint's
+// (lib/BlePageTurner, pageActionFor), so a remote turns the same way in both firmwares: Volume Up forward.
 constexpr Target targetForUsage(const uint8_t usage) {
   switch (usage) {
     case 0x4F:  // Right Arrow
@@ -28,14 +28,14 @@ constexpr Target targetForUsage(const uint8_t usage) {
     case 0x4E:  // Page Down
     case 0x2C:  // Space
     case 0x28:  // Enter
-    case 0xEA:  // Volume Down (consumer)
+    case 0xE9:  // Volume Up (consumer)
     case 0xB5:  // Scan Next Track (consumer)
       return Target::PageForward;
     case 0x50:  // Left Arrow
     case 0x52:  // Up Arrow
     case 0x4B:  // Page Up
     case 0x2A:  // Backspace
-    case 0xE9:  // Volume Up (consumer)
+    case 0xEA:  // Volume Down (consumer)
     case 0xB6:  // Scan Previous Track (consumer)
       return Target::PageBack;
     default:

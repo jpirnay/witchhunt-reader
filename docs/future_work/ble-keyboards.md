@@ -70,8 +70,8 @@ From CrossPoint's issues, PRs and code (`upstream/develop`, 2026-11-28). What ea
 | IINE Gamebrick, a video ring | not recorded | work (#2418, disc. #117) | not known |
 
 CrossPoint's default keys (`pageActionFor`): Left, Page Up, Up, Backspace, Volume Down, Scan Previous back; Right, Page
-Down, Down, Space, Enter, Volume Up, Scan Next forward. Ours are the same, except that the volume pair turns the other
-way. Nothing in CrossPoint names a camera shutter, an 8BitDo, a Kindle remote or a foot pedal. Open there: #4280 (BLE
+Down, Down, Space, Enter, Volume Up, Scan Next forward. Ours are the same, the volume pair included (the owner's choice,
+2026-11-28: a remote turns the same way in both firmwares). Nothing in CrossPoint names a camera shutter, an 8BitDo, a Kindle remote or a foot pedal. Open there: #4280 (BLE
 off until the chapter is built), #4416 (remote turns in the reading statistics; ours take the button path, PR 2), #4389 (Lock
 Controls), #4304 (a passkey is never shown).
 
